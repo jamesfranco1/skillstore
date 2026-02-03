@@ -38,7 +38,7 @@ File Storage (data/skills.json)
 Fetch the skill directory:
 
 ```bash
-curl -s http://localhost:3000/skills.json
+curl -s https://skillstoremd.xyz/skills.json
 ```
 
 Response schema:
