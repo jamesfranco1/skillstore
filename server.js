@@ -2,6 +2,11 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+
+// Services
+const agentKeys = require('./src/services/agent-keys');
+const watermark = require('./src/services/watermark');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,6 +15,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static('.'));
+
+// Data files
+const PURCHASES_FILE = path.join(__dirname, 'data', 'purchases.json');
 
 // Data file path
 const DATA_FILE = path.join(__dirname, 'data', 'skills.json');
@@ -120,6 +128,58 @@ function saveSkills(skills) {
 // Initialize skills
 let skills = loadSkills();
 
+// Load purchases from file
+function loadPurchases() {
+  try {
+    if (fs.existsSync(PURCHASES_FILE)) {
+      const data = fs.readFileSync(PURCHASES_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error('Error loading purchases:', err);
+  }
+  return [];
+}
+
+// Save purchases to file
+function savePurchases(purchases) {
+  try {
+    fs.writeFileSync(PURCHASES_FILE, JSON.stringify(purchases, null, 2));
+  } catch (err) {
+    console.error('Error saving purchases:', err);
+  }
+}
+
+// Initialize purchases
+let purchases = loadPurchases();
+
+// Middleware to verify agent API key
+function verifyAgentKey(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, error: 'Missing API key' });
+  }
+  
+  const apiKey = authHeader.slice(7);
+  const wallet = agentKeys.verifyAgentKey(apiKey);
+  
+  if (!wallet) {
+    return res.status(401).json({ success: false, error: 'Invalid API key' });
+  }
+  
+  req.agentWallet = wallet;
+  next();
+}
+
+// Check if wallet owns a skill
+function walletOwnsSkill(wallet, skillId) {
+  return purchases.some(p => 
+    p.buyerWallet === wallet && 
+    p.skillId === skillId &&
+    !p.refunded
+  );
+}
+
 // API Routes
 
 // GET /api/skills - Get all skills
@@ -227,6 +287,188 @@ app.get('/skills.md', (req, res) => {
   res.type('text/markdown').send(md);
 });
 
+// ============================================================================
+// AGENT API KEY ENDPOINTS
+// ============================================================================
+
+// POST /api/agent-keys - Generate new agent API key
+app.post('/api/agent-keys', (req, res) => {
+  const { wallet, message, signature } = req.body;
+  
+  if (!wallet || !message || !signature) {
+    return res.status(400).json({ 
+      success: false, 
+      error: 'Missing required fields: wallet, message, signature' 
+    });
+  }
+  
+  try {
+    const apiKey = agentKeys.createAgentKey(wallet, message, signature);
+    res.json({ success: true, apiKey });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/agent-keys - List keys for a wallet (requires auth)
+app.get('/api/agent-keys', verifyAgentKey, (req, res) => {
+  const keys = agentKeys.getWalletKeys(req.agentWallet);
+  res.json({ success: true, keys });
+});
+
+// DELETE /api/agent-keys/:key - Revoke an API key
+app.delete('/api/agent-keys/:key', verifyAgentKey, (req, res) => {
+  const revoked = agentKeys.revokeAgentKey(req.params.key, req.agentWallet);
+  
+  if (!revoked) {
+    return res.status(404).json({ success: false, error: 'Key not found or unauthorized' });
+  }
+  
+  res.json({ success: true, message: 'Key revoked' });
+});
+
+// ============================================================================
+// PURCHASE ENDPOINTS
+// ============================================================================
+
+// POST /api/purchases - Record a purchase (called after on-chain payment)
+app.post('/api/purchases', (req, res) => {
+  const { buyerWallet, skillId, txSignature, pricePaid } = req.body;
+  
+  if (!buyerWallet || !skillId || !txSignature) {
+    return res.status(400).json({ 
+      success: false, 
+      error: 'Missing required fields' 
+    });
+  }
+  
+  // Check skill exists
+  const skill = skills.find(s => s.id === skillId);
+  if (!skill) {
+    return res.status(404).json({ success: false, error: 'Skill not found' });
+  }
+  
+  // Check for duplicate purchase
+  if (walletOwnsSkill(buyerWallet, skillId)) {
+    return res.status(400).json({ success: false, error: 'Already purchased' });
+  }
+  
+  const purchase = {
+    id: `purchase-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    buyerWallet,
+    skillId,
+    skillTitle: skill.title,
+    creatorWallet: skill.wallet,
+    txSignature,
+    pricePaid: pricePaid || skill.price,
+    purchasedAt: new Date().toISOString(),
+    refunded: false,
+  };
+  
+  purchases.push(purchase);
+  savePurchases(purchases);
+  
+  // Increment download count
+  skill.downloads = (skill.downloads || 0) + 1;
+  saveSkills(skills);
+  
+  res.status(201).json({ success: true, data: purchase });
+});
+
+// GET /api/my-skills - Get purchased skills for wallet (requires auth)
+app.get('/api/my-skills', verifyAgentKey, (req, res) => {
+  const myPurchases = purchases.filter(p => 
+    p.buyerWallet === req.agentWallet && !p.refunded
+  );
+  
+  const mySkills = myPurchases.map(p => {
+    const skill = skills.find(s => s.id === p.skillId);
+    return {
+      purchaseId: p.id,
+      skillId: p.skillId,
+      title: p.skillTitle,
+      purchasedAt: p.purchasedAt,
+      downloadUrl: `/api/skills/${p.skillId}/content`,
+    };
+  });
+  
+  res.json({ success: true, data: mySkills });
+});
+
+// GET /api/skills/:id/content - Download watermarked skill content
+app.get('/api/skills/:id/content', verifyAgentKey, (req, res) => {
+  const skill = skills.find(s => s.id === req.params.id);
+  
+  if (!skill) {
+    return res.status(404).json({ success: false, error: 'Skill not found' });
+  }
+  
+  // Check ownership
+  const purchase = purchases.find(p => 
+    p.buyerWallet === req.agentWallet && 
+    p.skillId === req.params.id &&
+    !p.refunded
+  );
+  
+  if (!purchase) {
+    return res.status(403).json({ 
+      success: false, 
+      error: 'You do not own this skill',
+      purchaseUrl: `/api/skills/${req.params.id}`
+    });
+  }
+  
+  // Watermark the content
+  const watermarkedContent = watermark.watermarkSkill(skill.content, {
+    wallet: req.agentWallet,
+    skillId: skill.id,
+    purchaseId: purchase.id,
+    purchaseDate: purchase.purchasedAt,
+  });
+  
+  res.type('text/markdown').send(watermarkedContent);
+});
+
+// GET /api/purchases/verify/:wallet/:skillId - Check if wallet owns skill
+app.get('/api/purchases/verify/:wallet/:skillId', (req, res) => {
+  const owns = walletOwnsSkill(req.params.wallet, req.params.skillId);
+  res.json({ success: true, owns });
+});
+
+// ============================================================================
+// WATERMARK VERIFICATION
+// ============================================================================
+
+// POST /api/verify-watermark - Verify a watermarked file
+app.post('/api/verify-watermark', (req, res) => {
+  const { content } = req.body;
+  
+  if (!content) {
+    return res.status(400).json({ success: false, error: 'No content provided' });
+  }
+  
+  const result = watermark.verifyWatermark(content);
+  
+  // If we found a license ID, look up the purchase
+  if (result.licenseId) {
+    const purchase = purchases.find(p => p.id === result.licenseId);
+    if (purchase) {
+      result.purchaseInfo = {
+        skillId: purchase.skillId,
+        purchasedAt: purchase.purchasedAt,
+        isValid: !purchase.refunded,
+      };
+    }
+  }
+  
+  res.json({ success: true, data: result });
+});
+
+// GET /verify/:fingerprint - Public verification page
+app.get('/verify/:fingerprint', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`
@@ -239,4 +481,5 @@ app.listen(PORT, () => {
 ╚═══════════════════════════════════════════╝
   `);
 });
+
 
