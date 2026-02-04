@@ -10,20 +10,19 @@ const watermark = require('./src/services/watermark');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const IS_VERCEL = process.env.VERCEL === '1';
 
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static('.'));
 
-// Data files
+// Data files (only used when not on Vercel)
+const DATA_FILE = path.join(__dirname, 'data', 'skills.json');
 const PURCHASES_FILE = path.join(__dirname, 'data', 'purchases.json');
 
-// Data file path
-const DATA_FILE = path.join(__dirname, 'data', 'skills.json');
-
-// Ensure data directory exists
-if (!fs.existsSync(path.join(__dirname, 'data'))) {
+// Ensure data directory exists (only for local dev)
+if (!IS_VERCEL && !fs.existsSync(path.join(__dirname, 'data'))) {
   fs.mkdirSync(path.join(__dirname, 'data'));
 }
 
@@ -105,6 +104,9 @@ const defaultSkills = [
 
 // Load skills from file or use defaults
 function loadSkills() {
+  if (IS_VERCEL) {
+    return [...defaultSkills]; // Return copy for Vercel (in-memory)
+  }
   try {
     if (fs.existsSync(DATA_FILE)) {
       const data = fs.readFileSync(DATA_FILE, 'utf8');
@@ -113,11 +115,12 @@ function loadSkills() {
   } catch (err) {
     console.error('Error loading skills:', err);
   }
-  return defaultSkills;
+  return [...defaultSkills];
 }
 
-// Save skills to file
+// Save skills to file (no-op on Vercel)
 function saveSkills(skills) {
+  if (IS_VERCEL) return; // Skip file writes on Vercel
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(skills, null, 2));
   } catch (err) {
@@ -130,6 +133,9 @@ let skills = loadSkills();
 
 // Load purchases from file
 function loadPurchases() {
+  if (IS_VERCEL) {
+    return []; // In-memory for Vercel
+  }
   try {
     if (fs.existsSync(PURCHASES_FILE)) {
       const data = fs.readFileSync(PURCHASES_FILE, 'utf8');
@@ -141,8 +147,9 @@ function loadPurchases() {
   return [];
 }
 
-// Save purchases to file
+// Save purchases to file (no-op on Vercel)
 function savePurchases(purchases) {
+  if (IS_VERCEL) return; // Skip file writes on Vercel
   try {
     fs.writeFileSync(PURCHASES_FILE, JSON.stringify(purchases, null, 2));
   } catch (err) {
@@ -469,9 +476,10 @@ app.get('/verify/:fingerprint', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`
+// Start server (only in non-serverless environment)
+if (process.env.VERCEL !== '1') {
+  app.listen(PORT, () => {
+    console.log(`
 ╔═══════════════════════════════════════════╗
 ║         SKILLSTORE.MD SERVER              ║
 ╠═══════════════════════════════════════════╣
@@ -479,7 +487,9 @@ app.listen(PORT, () => {
 ║  API:      http://localhost:${PORT}/api/skills║
 ║  Index:    http://localhost:${PORT}/skills.json║
 ╚═══════════════════════════════════════════╝
-  `);
-});
+    `);
+  });
+}
 
-
+// Export for Vercel serverless
+module.exports = app;
