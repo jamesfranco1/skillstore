@@ -21,6 +21,7 @@
         <nav class="nav">
           <a href="#connect">Connect</a>
           <a href="#directory">Directory</a>
+          <a href="#my-skills" class="nav-auth" hidden>My Skills</a>
           <a href="#upload">Upload</a>
         </nav>
         <button class="wallet-btn" id="walletBtn">
@@ -82,6 +83,70 @@
 
           <div class="skills-grid" id="skillsGrid">
             <div class="loading">Loading skills...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- My Skills Dashboard (shown when wallet connected) -->
+      <section class="my-skills" id="my-skills" hidden>
+        <div class="container">
+          <div class="section-header">
+            <h2>MY SKILLS</h2>
+            <div class="my-skills-actions">
+              <button class="btn btn-secondary" id="generateKeyBtn">GENERATE AGENT KEY</button>
+            </div>
+          </div>
+
+          <!-- Agent Keys Panel -->
+          <div class="agent-keys-panel pixel-box" id="agentKeysPanel" hidden>
+            <div class="agent-keys-header">
+              <h3>AGENT API KEYS</h3>
+              <button class="panel-close" id="closeKeysPanel">X</button>
+            </div>
+            <p class="agent-keys-desc">
+              Give this key to your agent to access purchased skills via API.
+            </p>
+            <div class="agent-keys-list" id="agentKeysList">
+              <div class="loading">Loading keys...</div>
+            </div>
+            <button class="btn" id="createNewKeyBtn">CREATE NEW KEY</button>
+          </div>
+
+          <!-- New Key Modal -->
+          <div class="key-modal" id="keyModal" hidden>
+            <div class="key-modal-content pixel-box">
+              <h3>NEW API KEY GENERATED</h3>
+              <p>Copy this key now. It won't be shown again.</p>
+              <div class="key-display">
+                <code id="newKeyDisplay"></code>
+                <button class="btn btn-small" id="copyKeyBtn">COPY</button>
+              </div>
+              <pre class="key-usage">
+# List your purchased skills
+curl -H "Authorization: Bearer YOUR_KEY" \
+  https://skillstoremd.xyz/api/my-skills
+
+# Download a skill
+curl -H "Authorization: Bearer YOUR_KEY" \
+  https://skillstoremd.xyz/api/skills/SKILL_ID/content
+              </pre>
+              <button class="btn" id="closeKeyModal">DONE</button>
+            </div>
+          </div>
+
+          <!-- Purchased Skills Grid -->
+          <div class="my-skills-grid" id="mySkillsGrid">
+            <div class="loading">Connect wallet to view purchases...</div>
+          </div>
+
+          <!-- Empty State -->
+          <div class="my-skills-empty" id="mySkillsEmpty" hidden>
+            <div class="empty-box pixel-box">
+              <div class="empty-icon">?</div>
+              <h3>NO SKILLS YET</h3>
+              <p>Purchase skills from the directory to see them here.</p>
+              <a href="#directory" class="btn">BROWSE DIRECTORY</a>
+            </div>
           </div>
         </div>
       </section>
@@ -174,6 +239,28 @@
         </div>
       </section>
     </main>
+
+    <!-- Skill Detail Modal -->
+    <div class="skill-modal" id="skillModal" hidden>
+      <div class="skill-modal-content pixel-box">
+        <button class="modal-close" id="closeSkillModal">X</button>
+        <div class="skill-modal-header">
+          <span class="skill-tag" id="modalTag"></span>
+          <span class="skill-price" id="modalPrice"></span>
+        </div>
+        <h2 id="modalTitle"></h2>
+        <p id="modalDesc"></p>
+        <div class="skill-modal-meta">
+          <span>Creator: <strong id="modalCreator"></strong></span>
+          <span>Downloads: <strong id="modalDownloads"></strong></span>
+        </div>
+        <div class="skill-modal-actions">
+          <button class="btn btn-purchase" id="purchaseBtn">PURCHASE</button>
+          <button class="btn btn-secondary btn-download" id="downloadBtn" hidden>DOWNLOAD</button>
+        </div>
+        <div class="purchase-status" id="purchaseStatus" hidden></div>
+      </div>
+    </div>
 
     <footer class="footer">
       <div class="container footer-inner">
