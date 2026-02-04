@@ -19,3 +19,4 @@ Updated: 2026-02-02
   Summary: skills.md to automate WhatsApp + Discord routing with gateway policies.  
   URL: https://skillstore.md/#skill-openclaw
 
+

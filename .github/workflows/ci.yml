@@ -49,3 +49,4 @@ jobs:
           curl -f http://localhost:3000/skills.json || exit 1
           docker stop skillstore-test
 
+
