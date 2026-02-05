@@ -9,14 +9,95 @@ const router = express.Router();
 
 /**
  * GET /api/skills
- * List all skills with stats
+ * List skills with optional search/filter
+ * 
+ * Query params:
+ *   q        - Search query (searches title, description, tags, creator)
+ *   tag      - Filter by tag/category
+ *   category - Alias for tag
+ *   sort     - Sort order: newest, popular, price-low, price-high
+ *   minPrice - Minimum price
+ *   maxPrice - Maximum price
+ *   limit    - Number of results (default: 50)
+ *   offset   - Pagination offset
  */
 router.get('/', async (req, res) => {
   try {
-    const skills = await db.getSkills();
-    const stats = await db.getStats();
+    const { 
+      q, 
+      tag, 
+      category, 
+      sort = 'newest', 
+      minPrice, 
+      maxPrice,
+      limit = 50,
+      offset = 0 
+    } = req.query;
+
+    let skills = await db.getSkills();
     
-    res.json({ skills, stats });
+    // Search
+    if (q) {
+      const query = q.toLowerCase();
+      skills = skills.filter(skill => {
+        const searchable = `${skill.title} ${skill.description} ${skill.tags} ${skill.creator}`.toLowerCase();
+        return searchable.includes(query);
+      });
+    }
+
+    // Tag/category filter
+    const tagFilter = tag || category;
+    if (tagFilter) {
+      const filterLower = tagFilter.toLowerCase();
+      skills = skills.filter(skill => {
+        const tags = (skill.tags || '').toLowerCase();
+        return tags.includes(filterLower);
+      });
+    }
+
+    // Price filter
+    if (minPrice !== undefined) {
+      skills = skills.filter(skill => skill.price >= parseFloat(minPrice));
+    }
+    if (maxPrice !== undefined) {
+      skills = skills.filter(skill => skill.price <= parseFloat(maxPrice));
+    }
+
+    // Sort
+    switch (sort) {
+      case 'popular':
+        skills.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
+        break;
+      case 'price-low':
+        skills.sort((a, b) => a.price - b.price);
+        break;
+      case 'price-high':
+        skills.sort((a, b) => b.price - a.price);
+        break;
+      case 'newest':
+      default:
+        skills.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }
+
+    // Get total before pagination
+    const total = skills.length;
+
+    // Pagination
+    const limitNum = Math.min(parseInt(limit) || 50, 100);
+    const offsetNum = parseInt(offset) || 0;
+    skills = skills.slice(offsetNum, offsetNum + limitNum);
+
+    // Stats
+    const stats = await db.getStats();
+    stats.totalDownloads = await db.getTotalDownloads();
+
+    res.json({ 
+      skills,
+      total,
+      limit: limitNum,
+      offset: offsetNum,
+      stats
+    });
   } catch (err) {
     console.error('Error fetching skills:', err);
     res.status(500).json({ error: 'Failed to fetch skills' });
@@ -24,8 +105,45 @@ router.get('/', async (req, res) => {
 });
 
 /**
+ * GET /api/search
+ * Dedicated search endpoint for agents
+ * 
+ * Query params:
+ *   q - Search query (required)
+ */
+router.get('/search', async (req, res) => {
+  try {
+    const { q } = req.query;
+
+    if (!q) {
+      return res.status(400).json({ error: 'Search query required' });
+    }
+
+    const skills = await db.searchSkills(q);
+
+    res.json({
+      query: q,
+      count: skills.length,
+      results: skills.map(s => ({
+        id: s.id,
+        title: s.title,
+        creator: s.creator,
+        tags: s.tags ? s.tags.split(',').map(t => t.trim()) : [],
+        price_sol: s.price,
+        description: s.description,
+        downloads: s.downloads,
+        relevance: s.relevance // If using weighted search
+      }))
+    });
+  } catch (err) {
+    console.error('Search error:', err);
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
+/**
  * GET /api/skills/:id
- * Get single skill (without content)
+ * Get single skill metadata
  */
 router.get('/:id', async (req, res) => {
   try {
@@ -35,7 +153,7 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Skill not found' });
     }
 
-    // Don't include content in public response
+    // Don't include content
     const { content, ...publicSkill } = skill;
     res.json(publicSkill);
   } catch (err) {
@@ -62,17 +180,13 @@ router.get('/:id/content', async (req, res) => {
       return res.status(404).json({ error: 'Skill not found' });
     }
 
-    // Check ownership
     const owns = await db.checkOwnership(wallet, req.params.id);
     
     if (!owns) {
       return res.status(403).json({ error: 'You do not own this skill' });
     }
 
-    // Increment download count
     await db.incrementDownloads(req.params.id);
-
-    // Return content as markdown
     res.type('text/markdown').send(skill.content);
   } catch (err) {
     console.error('Error fetching content:', err);
@@ -88,15 +202,10 @@ router.post('/', async (req, res) => {
   try {
     const { title, creator, creatorWallet, tags, price, description, content } = req.body;
 
-    // Validation
-    if (!title || !creator || !price || !content) {
+    if (!title || !creator || !content) {
       return res.status(400).json({ 
-        error: 'Missing required fields: title, creator, price, content' 
+        error: 'Missing required fields: title, creator, content' 
       });
-    }
-
-    if (price < 0) {
-      return res.status(400).json({ error: 'Price must be positive' });
     }
 
     const skill = await db.createSkill({
@@ -104,7 +213,7 @@ router.post('/', async (req, res) => {
       creator,
       creatorWallet: creatorWallet || null,
       tags: tags || '',
-      price: parseFloat(price),
+      price: parseFloat(price) || 0,
       description: description || '',
       content
     });
@@ -116,64 +225,4 @@ router.post('/', async (req, res) => {
   }
 });
 
-/**
- * GET /api/skills.json
- * Agent-friendly JSON endpoint
- */
-router.get('.json', async (req, res) => {
-  try {
-    const skills = await db.getSkills();
-    
-    const agentFormat = skills.map(s => ({
-      id: s.id,
-      title: s.title,
-      creator: s.creator,
-      tags: s.tags ? s.tags.split(',').map(t => t.trim()) : [],
-      price_sol: s.price,
-      description: s.description,
-      downloads: s.downloads,
-      endpoint: `/api/skills/${s.id}`
-    }));
-
-    res.json({
-      name: 'skillstore.md',
-      version: '1.0.0',
-      updated: new Date().toISOString(),
-      skills: agentFormat
-    });
-  } catch (err) {
-    console.error('Error:', err);
-    res.status(500).json({ error: 'Failed to fetch skills' });
-  }
-});
-
-/**
- * GET /api/skills.md
- * Agent-friendly Markdown endpoint
- */
-router.get('.md', async (req, res) => {
-  try {
-    const skills = await db.getSkills();
-    
-    let md = `# skillstore.md - Skill Directory\n\n`;
-    md += `Updated: ${new Date().toISOString()}\n\n`;
-    md += `## Available Skills\n\n`;
-
-    for (const skill of skills) {
-      md += `### ${skill.title}\n`;
-      md += `- **Creator:** ${skill.creator}\n`;
-      md += `- **Price:** ${skill.price} SOL\n`;
-      md += `- **Tags:** ${skill.tags}\n`;
-      md += `- **Description:** ${skill.description}\n`;
-      md += `- **Endpoint:** \`/api/skills/${skill.id}\`\n\n`;
-    }
-
-    res.type('text/markdown').send(md);
-  } catch (err) {
-    console.error('Error:', err);
-    res.status(500).send('Failed to generate markdown');
-  }
-});
-
 module.exports = router;
-

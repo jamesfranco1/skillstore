@@ -1,25 +1,35 @@
 /**
- * Main Application
+ * Skillstore Application
  */
 
 const App = {
+  // State
   skills: [],
+  filteredSkills: [],
   purchases: [],
   currentSkill: null,
+  
+  // Filter state
+  filters: {
+    query: '',
+    category: '',
+    sort: 'newest',
+    price: ''
+  },
 
   /**
-   * Initialize the application
+   * Initialize
    */
   async init() {
-    // Setup wallet callbacks
+    // Wallet callbacks
     Wallet.onConnect = (address) => this.onWalletConnect(address);
     Wallet.onDisconnect = () => this.onWalletDisconnect();
     Wallet.onAccountChange = (address) => this.onWalletConnect(address);
 
-    // Setup event listeners
+    // Event listeners
     this.setupEventListeners();
 
-    // Check for existing wallet connection
+    // Check wallet
     await Wallet.checkConnection();
 
     // Load skills
@@ -27,26 +37,51 @@ const App = {
   },
 
   /**
-   * Setup DOM event listeners
+   * Setup event listeners
    */
   setupEventListeners() {
-    // Wallet button
+    // Wallet
     document.getElementById('walletBtn').addEventListener('click', () => {
-      if (Wallet.address) {
-        Wallet.disconnect();
-      } else {
-        Wallet.connect();
-      }
+      Wallet.address ? Wallet.disconnect() : Wallet.connect();
     });
 
-    // Upload connect button
     document.getElementById('uploadConnectBtn').addEventListener('click', () => {
       Wallet.connect();
     });
 
-    // Search input
-    document.getElementById('searchInput').addEventListener('input', (e) => {
-      this.filterSkills(e.target.value);
+    // Search
+    const searchInput = document.getElementById('searchInput');
+    searchInput.addEventListener('input', (e) => {
+      this.filters.query = e.target.value;
+      this.applyFilters();
+    });
+
+    // Keyboard shortcut for search
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && document.activeElement !== searchInput) {
+        e.preventDefault();
+        searchInput.focus();
+      }
+      if (e.key === 'Escape') {
+        searchInput.blur();
+        this.closeModal();
+      }
+    });
+
+    // Filters
+    document.getElementById('categoryFilter').addEventListener('change', (e) => {
+      this.filters.category = e.target.value;
+      this.applyFilters();
+    });
+
+    document.getElementById('sortFilter').addEventListener('change', (e) => {
+      this.filters.sort = e.target.value;
+      this.applyFilters();
+    });
+
+    document.getElementById('priceFilter').addEventListener('change', (e) => {
+      this.filters.price = e.target.value;
+      this.applyFilters();
     });
 
     // Upload form
@@ -55,107 +90,69 @@ const App = {
       this.handleUpload();
     });
 
-    // Modal close
-    document.getElementById('modalClose').addEventListener('click', () => {
-      this.closeModal();
-    });
-
-    // Modal backdrop click
-    document.querySelector('.modal-backdrop').addEventListener('click', () => {
-      this.closeModal();
-    });
-
-    // Purchase button
-    document.getElementById('modalPurchaseBtn').addEventListener('click', () => {
-      this.handlePurchase();
-    });
-
-    // Download button
-    document.getElementById('modalDownloadBtn').addEventListener('click', () => {
-      this.handleDownload();
-    });
-
-    // Escape key closes modal
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        this.closeModal();
-      }
-    });
+    // Modal
+    document.getElementById('modalClose').addEventListener('click', () => this.closeModal());
+    document.querySelector('.modal-backdrop').addEventListener('click', () => this.closeModal());
+    document.getElementById('modalPurchaseBtn').addEventListener('click', () => this.handlePurchase());
+    document.getElementById('modalDownloadBtn').addEventListener('click', () => this.handleDownload());
   },
 
   /**
-   * Handle wallet connect
+   * Wallet connected
    */
   async onWalletConnect(address) {
-    // Update wallet button
     const walletBtn = document.getElementById('walletBtn');
     walletBtn.classList.add('connected');
     walletBtn.querySelector('.wallet-text').textContent = Wallet.shortenAddress(address);
 
-    // Show auth-required elements
-    document.querySelectorAll('[data-auth]').forEach(el => {
-      el.hidden = false;
-    });
-
-    // Show upload form, hide notice
+    document.querySelectorAll('[data-auth]').forEach(el => el.hidden = false);
     document.getElementById('uploadNotice').hidden = true;
     document.getElementById('uploadFormContainer').hidden = false;
 
-    // Load purchases
     await this.loadPurchases();
-
-    // Re-render skills to show owned badges
-    this.renderSkills(this.skills);
+    this.renderSkills();
   },
 
   /**
-   * Handle wallet disconnect
+   * Wallet disconnected
    */
   onWalletDisconnect() {
-    // Update wallet button
     const walletBtn = document.getElementById('walletBtn');
     walletBtn.classList.remove('connected');
     walletBtn.querySelector('.wallet-text').textContent = 'Connect Wallet';
 
-    // Hide auth-required elements
-    document.querySelectorAll('[data-auth]').forEach(el => {
-      el.hidden = true;
-    });
-
-    // Hide upload form, show notice
+    document.querySelectorAll('[data-auth]').forEach(el => el.hidden = true);
     document.getElementById('uploadNotice').hidden = false;
     document.getElementById('uploadFormContainer').hidden = true;
 
-    // Clear purchases
     this.purchases = [];
-    this.renderSkills(this.skills);
+    this.renderSkills();
   },
 
   /**
-   * Load skills from API
+   * Load skills
    */
   async loadSkills() {
     try {
       const data = await API.getSkills();
-      this.skills = data.skills;
-      this.renderSkills(this.skills);
+      this.skills = data.skills || [];
+      this.applyFilters();
       this.updateStats(data.stats);
     } catch (err) {
       console.error('Failed to load skills:', err);
       document.getElementById('skillsGrid').innerHTML = 
-        '<div class="loading">Failed to load skills</div>';
+        '<div class="loading">Failed to load skills. Please try again.</div>';
     }
   },
 
   /**
-   * Load purchases for connected wallet
+   * Load purchases
    */
   async loadPurchases() {
     if (!Wallet.address) return;
-
     try {
       const data = await API.getPurchases(Wallet.address);
-      this.purchases = data.purchases;
+      this.purchases = data.purchases || [];
       this.renderMySkills();
     } catch (err) {
       console.error('Failed to load purchases:', err);
@@ -163,45 +160,180 @@ const App = {
   },
 
   /**
+   * Apply filters and sort
+   */
+  applyFilters() {
+    let filtered = [...this.skills];
+    const { query, category, sort, price } = this.filters;
+
+    // Search query
+    if (query) {
+      const q = query.toLowerCase();
+      filtered = filtered.filter(skill => {
+        const searchText = `${skill.title} ${skill.description} ${skill.creator} ${skill.tags}`.toLowerCase();
+        return searchText.includes(q);
+      });
+    }
+
+    // Category filter
+    if (category) {
+      filtered = filtered.filter(skill => {
+        const tags = (skill.tags || '').toLowerCase();
+        return tags.includes(category.toLowerCase());
+      });
+    }
+
+    // Price filter
+    if (price) {
+      filtered = filtered.filter(skill => {
+        const p = skill.price;
+        switch (price) {
+          case 'free': return p === 0;
+          case 'under-1': return p > 0 && p < 1;
+          case '1-5': return p >= 1 && p <= 5;
+          case 'over-5': return p > 5;
+          default: return true;
+        }
+      });
+    }
+
+    // Sort
+    switch (sort) {
+      case 'newest':
+        filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        break;
+      case 'popular':
+        filtered.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
+        break;
+      case 'price-low':
+        filtered.sort((a, b) => a.price - b.price);
+        break;
+      case 'price-high':
+        filtered.sort((a, b) => b.price - a.price);
+        break;
+    }
+
+    this.filteredSkills = filtered;
+    this.renderSkills();
+    this.renderActiveFilters();
+  },
+
+  /**
    * Render skills grid
    */
-  renderSkills(skills) {
+  renderSkills() {
     const grid = document.getElementById('skillsGrid');
+    const skills = this.filteredSkills;
+
+    // Update count
+    document.getElementById('resultsCount').textContent = skills.length;
 
     if (!skills.length) {
-      grid.innerHTML = '<div class="loading">No skills found</div>';
+      grid.innerHTML = `
+        <div class="empty-state">
+          <p>No skills match your search</p>
+          <button class="btn btn-secondary" onclick="App.clearFilters()">Clear Filters</button>
+        </div>
+      `;
       return;
     }
 
     grid.innerHTML = skills.map(skill => {
       const isOwned = this.purchases.some(p => p.skillId === skill.id);
+      const tags = (skill.tags || '').split(',').slice(0, 2);
+      const category = tags[0]?.trim() || 'skill';
+      
       return `
         <article class="skill-card ${isOwned ? 'owned' : ''}" data-id="${skill.id}">
           <div class="skill-header">
-            <span class="skill-tag">${this.getFirstTag(skill.tags)}</span>
-            <span class="skill-price">${skill.price} SOL</span>
+            <div class="skill-tags">
+              <span class="skill-tag category">${this.escapeHtml(category)}</span>
+              ${tags[1] ? `<span class="skill-tag">${this.escapeHtml(tags[1].trim())}</span>` : ''}
+            </div>
+            <span class="skill-price">${skill.price === 0 ? 'Free' : skill.price + ' SOL'}</span>
           </div>
           <h3>${this.escapeHtml(skill.title)}</h3>
           <p>${this.escapeHtml(skill.description || 'No description')}</p>
           <div class="skill-footer">
             <span class="skill-creator">${this.escapeHtml(skill.creator)}</span>
-            <button class="btn btn-secondary">${isOwned ? 'View' : 'Details'}</button>
+            <span class="skill-downloads">${skill.downloads || 0} downloads</span>
           </div>
         </article>
       `;
     }).join('');
 
-    // Add click handlers
+    // Click handlers
     grid.querySelectorAll('.skill-card').forEach(card => {
-      card.addEventListener('click', () => {
-        const skillId = card.dataset.id;
-        this.openSkillModal(skillId);
-      });
+      card.addEventListener('click', () => this.openSkillModal(card.dataset.id));
     });
   },
 
   /**
-   * Render my skills (purchases)
+   * Render active filter tags
+   */
+  renderActiveFilters() {
+    const container = document.getElementById('activeFilters');
+    const tags = [];
+
+    if (this.filters.query) {
+      tags.push({ label: `"${this.filters.query}"`, clear: () => {
+        this.filters.query = '';
+        document.getElementById('searchInput').value = '';
+        this.applyFilters();
+      }});
+    }
+
+    if (this.filters.category) {
+      tags.push({ label: this.filters.category, clear: () => {
+        this.filters.category = '';
+        document.getElementById('categoryFilter').value = '';
+        this.applyFilters();
+      }});
+    }
+
+    if (this.filters.price) {
+      const labels = { 'free': 'Free', 'under-1': '<1 SOL', '1-5': '1-5 SOL', 'over-5': '>5 SOL' };
+      tags.push({ label: labels[this.filters.price], clear: () => {
+        this.filters.price = '';
+        document.getElementById('priceFilter').value = '';
+        this.applyFilters();
+      }});
+    }
+
+    container.innerHTML = tags.map((tag, i) => `
+      <span class="filter-tag">
+        ${tag.label}
+        <button onclick="App.clearFilter(${i})">&times;</button>
+      </span>
+    `).join('');
+
+    // Store clear functions
+    this._filterClears = tags.map(t => t.clear);
+  },
+
+  /**
+   * Clear single filter
+   */
+  clearFilter(index) {
+    if (this._filterClears && this._filterClears[index]) {
+      this._filterClears[index]();
+    }
+  },
+
+  /**
+   * Clear all filters
+   */
+  clearFilters() {
+    this.filters = { query: '', category: '', sort: 'newest', price: '' };
+    document.getElementById('searchInput').value = '';
+    document.getElementById('categoryFilter').value = '';
+    document.getElementById('sortFilter').value = 'newest';
+    document.getElementById('priceFilter').value = '';
+    this.applyFilters();
+  },
+
+  /**
+   * Render my skills
    */
   renderMySkills() {
     const grid = document.getElementById('mySkillsGrid');
@@ -210,60 +342,48 @@ const App = {
       grid.innerHTML = `
         <div class="empty-state">
           <p>No purchases yet</p>
-          <a href="#directory" class="btn">Browse Directory</a>
+          <a href="#directory" class="btn btn-secondary">Browse Directory</a>
         </div>
       `;
       return;
     }
 
-    grid.innerHTML = this.purchases.map(purchase => {
-      const skill = this.skills.find(s => s.id === purchase.skillId);
-      return `
-        <article class="skill-card owned" data-id="${purchase.skillId}">
-          <div class="skill-header">
-            <span class="skill-tag">${skill ? this.getFirstTag(skill.tags) : 'skill'}</span>
-            <span class="skill-price">Owned</span>
-          </div>
-          <h3>${this.escapeHtml(purchase.skillTitle)}</h3>
-          <div class="skill-footer">
-            <span class="skill-creator">Purchased ${new Date(purchase.purchasedAt).toLocaleDateString()}</span>
-            <button class="btn btn-success" onclick="App.downloadSkill('${purchase.skillId}')">Download</button>
-          </div>
-        </article>
-      `;
-    }).join('');
+    grid.innerHTML = this.purchases.map(purchase => `
+      <article class="skill-card owned" data-id="${purchase.skillId}">
+        <div class="skill-header">
+          <span class="skill-tag category">Owned</span>
+        </div>
+        <h3>${this.escapeHtml(purchase.skillTitle)}</h3>
+        <div class="skill-footer">
+          <span>${new Date(purchase.purchasedAt).toLocaleDateString()}</span>
+          <button class="btn btn-success" onclick="event.stopPropagation(); App.downloadSkill('${purchase.skillId}')">
+            Download
+          </button>
+        </div>
+      </article>
+    `).join('');
   },
 
   /**
-   * Update stats display
+   * Update stats
    */
   updateStats(stats) {
+    if (!stats) return;
     document.getElementById('statSkills').textContent = stats.totalSkills || 0;
     document.getElementById('statCreators').textContent = stats.totalCreators || 0;
-    document.getElementById('statSales').textContent = stats.totalSales || 0;
-  },
-
-  /**
-   * Filter skills by search query
-   */
-  filterSkills(query) {
-    const q = query.toLowerCase().trim();
+    document.getElementById('statDownloads').textContent = stats.totalDownloads || 0;
     
-    if (!q) {
-      this.renderSkills(this.skills);
-      return;
-    }
-
-    const filtered = this.skills.filter(skill => {
-      const searchable = `${skill.title} ${skill.description} ${skill.creator} ${skill.tags}`.toLowerCase();
-      return searchable.includes(q);
+    // Count unique categories
+    const categories = new Set();
+    this.skills.forEach(s => {
+      const cat = (s.tags || '').split(',')[0]?.trim();
+      if (cat) categories.add(cat.toLowerCase());
     });
-
-    this.renderSkills(filtered);
+    document.getElementById('statCategories').textContent = categories.size;
   },
 
   /**
-   * Open skill detail modal
+   * Open skill modal
    */
   openSkillModal(skillId) {
     const skill = this.skills.find(s => s.id === skillId);
@@ -271,19 +391,22 @@ const App = {
 
     this.currentSkill = skill;
     const isOwned = this.purchases.some(p => p.skillId === skillId);
+    const tags = (skill.tags || '').split(',').map(t => t.trim()).filter(Boolean);
 
-    // Populate modal
-    document.getElementById('modalTag').textContent = this.getFirstTag(skill.tags);
-    document.getElementById('modalPrice').textContent = `${skill.price} SOL`;
+    // Populate
+    document.getElementById('modalTags').innerHTML = tags.map(t => 
+      `<span class="skill-tag">${this.escapeHtml(t)}</span>`
+    ).join('');
+    document.getElementById('modalPrice').textContent = skill.price === 0 ? 'Free' : skill.price + ' SOL';
     document.getElementById('modalTitle').textContent = skill.title;
     document.getElementById('modalDesc').textContent = skill.description || 'No description provided.';
     document.getElementById('modalCreator').textContent = skill.creator;
     document.getElementById('modalDownloads').textContent = skill.downloads || 0;
+    document.getElementById('modalDate').textContent = new Date(skill.createdAt).toLocaleDateString();
 
-    // Show/hide buttons
+    // Buttons
     const purchaseBtn = document.getElementById('modalPurchaseBtn');
     const downloadBtn = document.getElementById('modalDownloadBtn');
-    const statusEl = document.getElementById('modalStatus');
 
     if (isOwned) {
       purchaseBtn.hidden = true;
@@ -294,7 +417,7 @@ const App = {
       purchaseBtn.textContent = Wallet.address ? 'Purchase' : 'Connect Wallet';
     }
 
-    statusEl.hidden = true;
+    document.getElementById('modalStatus').hidden = true;
     document.getElementById('skillModal').hidden = false;
   },
 
@@ -312,7 +435,6 @@ const App = {
   async handlePurchase() {
     if (!this.currentSkill) return;
 
-    // Connect wallet if not connected
     if (!Wallet.address) {
       await Wallet.connect();
       return;
@@ -327,19 +449,16 @@ const App = {
     purchaseBtn.disabled = true;
 
     try {
-      // Check if creator has a wallet set
       if (!this.currentSkill.creatorWallet) {
         throw new Error('Creator has not set a payment wallet');
       }
 
-      // Execute Solana transaction
       statusEl.textContent = 'Confirm in Phantom...';
       const signature = await Solana.executePurchase(
         this.currentSkill.creatorWallet,
         this.currentSkill.price
       );
 
-      // Record purchase in backend
       statusEl.textContent = 'Recording purchase...';
       await API.createPurchase({
         buyerWallet: Wallet.address,
@@ -348,23 +467,21 @@ const App = {
         pricePaid: this.currentSkill.price
       });
 
-      // Success
       statusEl.className = 'modal-status success';
       statusEl.textContent = 'Purchase successful!';
 
-      // Update UI
       this.purchases.push({
         skillId: this.currentSkill.id,
         skillTitle: this.currentSkill.title,
         purchasedAt: new Date().toISOString()
       });
 
-      document.getElementById('modalPurchaseBtn').hidden = true;
+      purchaseBtn.hidden = true;
       document.getElementById('modalDownloadBtn').hidden = false;
 
-      this.renderSkills(this.skills);
+      this.renderSkills();
       this.renderMySkills();
-      this.loadSkills(); // Refresh download count
+      this.loadSkills();
 
     } catch (err) {
       console.error('Purchase failed:', err);
@@ -376,7 +493,7 @@ const App = {
   },
 
   /**
-   * Handle download
+   * Handle download from modal
    */
   async handleDownload() {
     if (!this.currentSkill) return;
@@ -384,7 +501,7 @@ const App = {
   },
 
   /**
-   * Download a skill
+   * Download skill
    */
   async downloadSkill(skillId) {
     if (!Wallet.address) {
@@ -395,9 +512,8 @@ const App = {
     try {
       const content = await API.getSkillContent(skillId, Wallet.address);
       const skill = this.skills.find(s => s.id === skillId);
-      const filename = `${skill?.title || 'skill'}.md`.toLowerCase().replace(/\s+/g, '-');
+      const filename = `${skill?.title || 'skill'}.md`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
-      // Create download
       const blob = new Blob([content], { type: 'text/markdown' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -407,7 +523,6 @@ const App = {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-
     } catch (err) {
       console.error('Download failed:', err);
       alert(err.message || 'Download failed');
@@ -415,7 +530,7 @@ const App = {
   },
 
   /**
-   * Handle skill upload
+   * Handle upload
    */
   async handleUpload() {
     if (!Wallet.address) return;
@@ -427,7 +542,7 @@ const App = {
     try {
       const skillData = {
         title: document.getElementById('skillTitle').value.trim(),
-        price: parseFloat(document.getElementById('skillPrice').value),
+        price: parseFloat(document.getElementById('skillPrice').value) || 0,
         tags: document.getElementById('skillTags').value.trim(),
         description: document.getElementById('skillDesc').value.trim(),
         content: document.getElementById('skillContent').value,
@@ -435,15 +550,18 @@ const App = {
         creatorWallet: Wallet.address
       };
 
+      // Add category to tags if selected
+      const category = document.getElementById('skillCategory').value;
+      if (category && !skillData.tags.toLowerCase().includes(category)) {
+        skillData.tags = category + ', ' + skillData.tags;
+      }
+
       await API.createSkill(skillData);
-
-      // Reset form
       document.getElementById('uploadForm').reset();
-
-      // Reload skills
       await this.loadSkills();
-
+      
       alert('Skill uploaded successfully!');
+      window.location.hash = '#directory';
 
     } catch (err) {
       console.error('Upload failed:', err);
@@ -455,26 +573,16 @@ const App = {
   },
 
   /**
-   * Helper: Get first tag from comma-separated list
-   */
-  getFirstTag(tags) {
-    if (!tags) return 'skill';
-    return tags.split(',')[0].trim();
-  },
-
-  /**
-   * Helper: Escape HTML
+   * Escape HTML
    */
   escapeHtml(text) {
+    if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
   }
 };
 
-// Initialize when DOM is ready
+// Init
 document.addEventListener('DOMContentLoaded', () => App.init());
-
-// Export for console debugging
 window.App = App;
-

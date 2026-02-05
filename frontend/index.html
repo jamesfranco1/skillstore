@@ -3,24 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0d0d0d">
-  <title>skillstore.md</title>
-  <meta name="description" content="Skill marketplace for AI agents. Pay in SOL.">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>skillstore.md - Skill Directory for AI Agents</title>
+  <meta name="description" content="Searchable directory of skills for AI agents. Find, purchase, and download skills. Pay in SOL.">
   
   <!-- Agent-friendly endpoints -->
-  <link rel="alternate" type="application/json" href="/api/skills.json">
-  <link rel="alternate" type="text/markdown" href="/api/skills.md">
+  <link rel="alternate" type="application/json" href="/api/skills.json" title="Skills JSON">
+  <link rel="alternate" type="text/markdown" href="/api/skills.md" title="Skills Markdown">
   
   <link rel="stylesheet" href="/css/main.css">
 </head>
 <body>
   <header class="header">
     <div class="container header-inner">
-      <a href="/" class="logo">SKILLSTORE.MD</a>
+      <a href="/" class="logo">skillstore.md</a>
       <nav class="nav">
         <a href="#directory">Directory</a>
         <a href="#upload">Upload</a>
-        <a href="#my-skills" class="nav-my-skills" data-auth>My Skills</a>
+        <a href="#my-skills" class="nav-link-auth" data-auth hidden>My Skills</a>
       </nav>
       <button class="wallet-btn" id="walletBtn">
         <span class="wallet-icon"></span>
@@ -30,44 +30,114 @@
   </header>
 
   <main>
-    <!-- Hero -->
+    <!-- Hero with Agent Endpoint -->
     <section class="hero">
       <div class="container">
-        <h1>Skill Marketplace<br>for AI Agents</h1>
-        <p class="hero-sub">Upload skills. Set a price. Get paid in SOL.</p>
+        <h1>Skill Directory for AI Agents</h1>
+        <p class="hero-sub">Search, discover, and acquire skills. Creators get paid in SOL.</p>
         
-        <div class="connect-box">
-          <div class="connect-label">Agent Endpoint</div>
-          <code class="connect-code">curl https://skillstoremd.xyz/api/skills.json</code>
+        <div class="agent-endpoints">
+          <div class="endpoint">
+            <span class="endpoint-label">JSON</span>
+            <code>GET /api/skills?q=search&tag=security&sort=downloads</code>
+          </div>
+          <div class="endpoint">
+            <span class="endpoint-label">Search</span>
+            <code>GET /api/search?q=kubernetes+security</code>
+          </div>
         </div>
-      </div>
-    </section>
-
-    <!-- Stats -->
-    <section class="stats">
-      <div class="stat">
-        <span class="stat-value" id="statSkills">0</span>
-        <span class="stat-label">Skills</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value" id="statCreators">0</span>
-        <span class="stat-label">Creators</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value" id="statSales">0</span>
-        <span class="stat-label">Sales</span>
       </div>
     </section>
 
     <!-- Directory -->
     <section class="directory" id="directory">
       <div class="container">
-        <div class="section-head">
-          <h2>Directory</h2>
-          <input type="search" class="search-input" id="searchInput" placeholder="Search skills...">
+        <!-- Search and Filters -->
+        <div class="directory-controls">
+          <div class="search-box">
+            <input 
+              type="search" 
+              class="search-input" 
+              id="searchInput" 
+              placeholder="Search skills, tags, creators..."
+              autocomplete="off"
+            >
+            <kbd class="search-hint">/</kbd>
+          </div>
+          
+          <div class="filters">
+            <div class="filter-group">
+              <label>Category</label>
+              <select id="categoryFilter">
+                <option value="">All Categories</option>
+                <option value="security">Security</option>
+                <option value="automation">Automation</option>
+                <option value="data">Data</option>
+                <option value="blockchain">Blockchain</option>
+                <option value="llm">LLM</option>
+                <option value="devops">DevOps</option>
+              </select>
+            </div>
+            
+            <div class="filter-group">
+              <label>Sort by</label>
+              <select id="sortFilter">
+                <option value="newest">Newest</option>
+                <option value="popular">Most Downloaded</option>
+                <option value="price-low">Price: Low to High</option>
+                <option value="price-high">Price: High to Low</option>
+              </select>
+            </div>
+            
+            <div class="filter-group">
+              <label>Price</label>
+              <select id="priceFilter">
+                <option value="">Any Price</option>
+                <option value="free">Free</option>
+                <option value="under-1">Under 1 SOL</option>
+                <option value="1-5">1 - 5 SOL</option>
+                <option value="over-5">Over 5 SOL</option>
+              </select>
+            </div>
+          </div>
         </div>
+
+        <!-- Active Filters / Results Info -->
+        <div class="results-info" id="resultsInfo">
+          <span class="results-count"><strong id="resultsCount">0</strong> skills found</span>
+          <div class="active-filters" id="activeFilters"></div>
+        </div>
+
+        <!-- Skills Grid -->
         <div class="skills-grid" id="skillsGrid">
-          <div class="loading">Loading...</div>
+          <div class="loading">Loading skills...</div>
+        </div>
+
+        <!-- Load More -->
+        <div class="load-more" id="loadMore" hidden>
+          <button class="btn btn-secondary" id="loadMoreBtn">Load More</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stats Bar -->
+    <section class="stats-bar">
+      <div class="container stats-inner">
+        <div class="stat">
+          <span class="stat-value" id="statSkills">0</span>
+          <span class="stat-label">Skills</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="statCreators">0</span>
+          <span class="stat-label">Creators</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="statDownloads">0</span>
+          <span class="stat-label">Downloads</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="statCategories">0</span>
+          <span class="stat-label">Categories</span>
         </div>
       </div>
     </section>
@@ -81,7 +151,7 @@
         <div class="my-skills-grid" id="mySkillsGrid">
           <div class="empty-state">
             <p>No purchases yet</p>
-            <a href="#directory" class="btn">Browse Directory</a>
+            <a href="#directory" class="btn btn-secondary">Browse Directory</a>
           </div>
         </div>
       </div>
@@ -92,14 +162,14 @@
       <div class="container">
         <div class="section-head">
           <h2>Upload a Skill</h2>
-          <p>Share your expertise and earn SOL</p>
+          <p>Share your expertise and earn SOL when agents download it</p>
         </div>
 
         <!-- Wallet required notice -->
         <div class="upload-notice" id="uploadNotice">
           <div class="notice-box">
-            <p>Connect your Solana wallet to upload skills</p>
-            <button class="btn" id="uploadConnectBtn">Connect Phantom</button>
+            <p>Connect your Solana wallet to upload skills and receive payments</p>
+            <button class="btn btn-primary" id="uploadConnectBtn">Connect Phantom</button>
           </div>
         </div>
 
@@ -109,30 +179,54 @@
             <div class="form-row">
               <div class="form-group">
                 <label for="skillTitle">Title</label>
-                <input type="text" id="skillTitle" required placeholder="LLM Red Teaming">
+                <input type="text" id="skillTitle" required placeholder="e.g. LLM Red Teaming Techniques">
               </div>
-              <div class="form-group">
+              <div class="form-group form-group-small">
                 <label for="skillPrice">Price (SOL)</label>
                 <input type="number" id="skillPrice" required min="0" step="0.01" placeholder="1.5">
               </div>
             </div>
 
-            <div class="form-group">
-              <label for="skillTags">Tags</label>
-              <input type="text" id="skillTags" required placeholder="security, llm, audit">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="skillTags">Tags <span class="label-hint">comma separated</span></label>
+                <input type="text" id="skillTags" required placeholder="security, llm, prompt-injection">
+              </div>
+              <div class="form-group form-group-small">
+                <label for="skillCategory">Category</label>
+                <select id="skillCategory" required>
+                  <option value="">Select...</option>
+                  <option value="security">Security</option>
+                  <option value="automation">Automation</option>
+                  <option value="data">Data</option>
+                  <option value="blockchain">Blockchain</option>
+                  <option value="llm">LLM</option>
+                  <option value="devops">DevOps</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
             </div>
 
             <div class="form-group">
               <label for="skillDesc">Description</label>
-              <textarea id="skillDesc" rows="2" placeholder="Brief description..."></textarea>
+              <textarea id="skillDesc" rows="2" placeholder="Brief description of what this skill teaches..."></textarea>
             </div>
 
             <div class="form-group">
-              <label for="skillContent">Content (Markdown)</label>
-              <textarea id="skillContent" rows="10" required placeholder="# Your Skill&#10;&#10;Write your skill content here..."></textarea>
+              <label for="skillContent">Content <span class="label-hint">Markdown supported</span></label>
+              <textarea id="skillContent" rows="12" required placeholder="# Your Skill Title
+
+## Overview
+Describe what this skill covers...
+
+## Instructions
+Step-by-step guide...
+
+## Examples
+Code examples, use cases..."></textarea>
             </div>
 
-            <button type="submit" class="btn btn-primary" id="uploadBtn">Upload Skill</button>
+            <button type="submit" class="btn btn-primary btn-large" id="uploadBtn">Upload Skill</button>
           </form>
         </div>
       </div>
@@ -144,20 +238,35 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <button class="modal-close" id="modalClose">&times;</button>
+      
       <div class="modal-header">
-        <span class="skill-tag" id="modalTag"></span>
+        <div class="modal-tags" id="modalTags"></div>
         <span class="skill-price" id="modalPrice"></span>
       </div>
+      
       <h2 id="modalTitle"></h2>
-      <p id="modalDesc"></p>
+      <p class="modal-desc" id="modalDesc"></p>
+      
       <div class="modal-meta">
-        <span>By <strong id="modalCreator"></strong></span>
-        <span><strong id="modalDownloads"></strong> downloads</span>
+        <div class="meta-item">
+          <span class="meta-label">Creator</span>
+          <span class="meta-value" id="modalCreator"></span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Downloads</span>
+          <span class="meta-value" id="modalDownloads"></span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Added</span>
+          <span class="meta-value" id="modalDate"></span>
+        </div>
       </div>
+
       <div class="modal-actions">
-        <button class="btn btn-primary" id="modalPurchaseBtn">Purchase</button>
-        <button class="btn btn-secondary" id="modalDownloadBtn" hidden>Download</button>
+        <button class="btn btn-primary btn-large" id="modalPurchaseBtn">Purchase</button>
+        <button class="btn btn-success btn-large" id="modalDownloadBtn" hidden>Download</button>
       </div>
+      
       <div class="modal-status" id="modalStatus" hidden></div>
     </div>
   </div>
@@ -167,6 +276,7 @@
       <span class="footer-logo">skillstore.md</span>
       <div class="footer-links">
         <a href="/api/skills.json">API</a>
+        <a href="/api/skills.md">Markdown</a>
         <a href="https://github.com/jamesfranco1/skillstore">GitHub</a>
       </div>
     </div>
@@ -178,4 +288,3 @@
   <script src="/js/app.js"></script>
 </body>
 </html>
-

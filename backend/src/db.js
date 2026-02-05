@@ -176,6 +176,37 @@ async function getStats() {
   };
 }
 
+async function getTotalDownloads() {
+  const result = await pool.query('SELECT COALESCE(SUM(downloads), 0) as total FROM skills');
+  return parseInt(result.rows[0].total);
+}
+
+/**
+ * Search skills with relevance scoring
+ */
+async function searchSkills(query) {
+  const q = `%${query.toLowerCase()}%`;
+  
+  const { rows } = await pool.query(`
+    SELECT *,
+      CASE 
+        WHEN LOWER(title) LIKE $1 THEN 3
+        WHEN LOWER(tags) LIKE $1 THEN 2
+        WHEN LOWER(description) LIKE $1 THEN 1
+        ELSE 0
+      END as relevance
+    FROM skills
+    WHERE 
+      LOWER(title) LIKE $1 OR
+      LOWER(description) LIKE $1 OR
+      LOWER(tags) LIKE $1 OR
+      LOWER(creator) LIKE $1
+    ORDER BY relevance DESC, downloads DESC
+  `, [q]);
+  
+  return rows.map(formatSkill);
+}
+
 function formatSkill(row) {
   return {
     id: row.id,
@@ -250,6 +281,8 @@ module.exports = {
   createSkill,
   incrementDownloads,
   getStats,
+  getTotalDownloads,
+  searchSkills,
   // Purchases
   getPurchasesByWallet,
   getPurchase,
