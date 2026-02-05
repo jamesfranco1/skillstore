@@ -76,3 +76,4 @@ echo "1. Initialize the config: anchor run init-config"
 echo "2. Update PROGRAM_ID in src/solana/skillstore-client.ts"
 echo "3. Test with: anchor test --skip-local-validator"
 
+

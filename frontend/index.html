@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d0d0d">
+  <title>skillstore.md</title>
+  <meta name="description" content="Skill marketplace for AI agents. Pay in SOL.">
+  
+  <!-- Agent-friendly endpoints -->
+  <link rel="alternate" type="application/json" href="/api/skills.json">
+  <link rel="alternate" type="text/markdown" href="/api/skills.md">
+  
+  <link rel="stylesheet" href="/css/main.css">
+</head>
+<body>
+  <header class="header">
+    <div class="container header-inner">
+      <a href="/" class="logo">SKILLSTORE.MD</a>
+      <nav class="nav">
+        <a href="#directory">Directory</a>
+        <a href="#upload">Upload</a>
+        <a href="#my-skills" class="nav-my-skills" data-auth>My Skills</a>
+      </nav>
+      <button class="wallet-btn" id="walletBtn">
+        <span class="wallet-icon"></span>
+        <span class="wallet-text">Connect Wallet</span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="container">
+        <h1>Skill Marketplace<br>for AI Agents</h1>
+        <p class="hero-sub">Upload skills. Set a price. Get paid in SOL.</p>
+        
+        <div class="connect-box">
+          <div class="connect-label">Agent Endpoint</div>
+          <code class="connect-code">curl https://skillstoremd.xyz/api/skills.json</code>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stats -->
+    <section class="stats">
+      <div class="stat">
+        <span class="stat-value" id="statSkills">0</span>
+        <span class="stat-label">Skills</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="statCreators">0</span>
+        <span class="stat-label">Creators</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="statSales">0</span>
+        <span class="stat-label">Sales</span>
+      </div>
+    </section>
+
+    <!-- Directory -->
+    <section class="directory" id="directory">
+      <div class="container">
+        <div class="section-head">
+          <h2>Directory</h2>
+          <input type="search" class="search-input" id="searchInput" placeholder="Search skills...">
+        </div>
+        <div class="skills-grid" id="skillsGrid">
+          <div class="loading">Loading...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- My Skills (auth required) -->
+    <section class="my-skills" id="my-skills" data-auth hidden>
+      <div class="container">
+        <div class="section-head">
+          <h2>My Purchases</h2>
+        </div>
+        <div class="my-skills-grid" id="mySkillsGrid">
+          <div class="empty-state">
+            <p>No purchases yet</p>
+            <a href="#directory" class="btn">Browse Directory</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Upload -->
+    <section class="upload" id="upload">
+      <div class="container">
+        <div class="section-head">
+          <h2>Upload a Skill</h2>
+          <p>Share your expertise and earn SOL</p>
+        </div>
+
+        <!-- Wallet required notice -->
+        <div class="upload-notice" id="uploadNotice">
+          <div class="notice-box">
+            <p>Connect your Solana wallet to upload skills</p>
+            <button class="btn" id="uploadConnectBtn">Connect Phantom</button>
+          </div>
+        </div>
+
+        <!-- Upload form (shown when connected) -->
+        <div class="upload-form-container" id="uploadFormContainer" hidden>
+          <form class="upload-form" id="uploadForm">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="skillTitle">Title</label>
+                <input type="text" id="skillTitle" required placeholder="LLM Red Teaming">
+              </div>
+              <div class="form-group">
+                <label for="skillPrice">Price (SOL)</label>
+                <input type="number" id="skillPrice" required min="0" step="0.01" placeholder="1.5">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="skillTags">Tags</label>
+              <input type="text" id="skillTags" required placeholder="security, llm, audit">
+            </div>
+
+            <div class="form-group">
+              <label for="skillDesc">Description</label>
+              <textarea id="skillDesc" rows="2" placeholder="Brief description..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="skillContent">Content (Markdown)</label>
+              <textarea id="skillContent" rows="10" required placeholder="# Your Skill&#10;&#10;Write your skill content here..."></textarea>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="uploadBtn">Upload Skill</button>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Skill Modal -->
+  <div class="modal" id="skillModal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <button class="modal-close" id="modalClose">&times;</button>
+      <div class="modal-header">
+        <span class="skill-tag" id="modalTag"></span>
+        <span class="skill-price" id="modalPrice"></span>
+      </div>
+      <h2 id="modalTitle"></h2>
+      <p id="modalDesc"></p>
+      <div class="modal-meta">
+        <span>By <strong id="modalCreator"></strong></span>
+        <span><strong id="modalDownloads"></strong> downloads</span>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="modalPurchaseBtn">Purchase</button>
+        <button class="btn btn-secondary" id="modalDownloadBtn" hidden>Download</button>
+      </div>
+      <div class="modal-status" id="modalStatus" hidden></div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <span class="footer-logo">skillstore.md</span>
+      <div class="footer-links">
+        <a href="/api/skills.json">API</a>
+        <a href="https://github.com/jamesfranco1/skillstore">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/wallet.js"></script>
+  <script src="/js/solana.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
+
