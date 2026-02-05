@@ -1,5 +1,6 @@
 /**
  * Skillstore Application
+ * Old-school file browser with keyboard navigation
  */
 
 const App = {
@@ -9,31 +10,33 @@ const App = {
   purchases: [],
   currentSkill: null,
   
-  // Filter state
-  filters: {
-    query: '',
-    category: '',
-    sort: 'newest',
-    price: ''
-  },
+  // Browser state
+  activePanel: 'tree', // 'tree' or 'list'
+  treeIndex: 0,
+  listIndex: 0,
+  selectedCategory: 'all',
+  selectedSort: 'newest',
+  searchQuery: '',
+
+  // Categories
+  categories: ['all', 'security', 'automation', 'data', 'blockchain', 'llm', 'devops'],
 
   /**
    * Initialize
    */
   async init() {
-    // Wallet callbacks
     Wallet.onConnect = (address) => this.onWalletConnect(address);
     Wallet.onDisconnect = () => this.onWalletDisconnect();
     Wallet.onAccountChange = (address) => this.onWalletConnect(address);
 
-    // Event listeners
     this.setupEventListeners();
+    this.setupKeyboardNavigation();
 
-    // Check wallet
     await Wallet.checkConnection();
-
-    // Load skills
     await this.loadSkills();
+
+    // Focus tree by default
+    document.getElementById('browserTree').focus();
   },
 
   /**
@@ -52,36 +55,17 @@ const App = {
     // Search
     const searchInput = document.getElementById('searchInput');
     searchInput.addEventListener('input', (e) => {
-      this.filters.query = e.target.value;
+      this.searchQuery = e.target.value;
       this.applyFilters();
     });
 
-    // Keyboard shortcut for search
-    document.addEventListener('keydown', (e) => {
-      if (e.key === '/' && document.activeElement !== searchInput) {
-        e.preventDefault();
-        searchInput.focus();
-      }
-      if (e.key === 'Escape') {
-        searchInput.blur();
-        this.closeModal();
-      }
-    });
-
-    // Filters
-    document.getElementById('categoryFilter').addEventListener('change', (e) => {
-      this.filters.category = e.target.value;
-      this.applyFilters();
-    });
-
-    document.getElementById('sortFilter').addEventListener('change', (e) => {
-      this.filters.sort = e.target.value;
-      this.applyFilters();
-    });
-
-    document.getElementById('priceFilter').addEventListener('change', (e) => {
-      this.filters.price = e.target.value;
-      this.applyFilters();
+    // Tree items click
+    document.querySelectorAll('.tree-item').forEach((item, index) => {
+      item.addEventListener('click', () => {
+        this.treeIndex = index;
+        this.selectTreeItem(item);
+        document.getElementById('browserTree').focus();
+      });
     });
 
     // Upload form
@@ -95,6 +79,236 @@ const App = {
     document.querySelector('.modal-backdrop').addEventListener('click', () => this.closeModal());
     document.getElementById('modalPurchaseBtn').addEventListener('click', () => this.handlePurchase());
     document.getElementById('modalDownloadBtn').addEventListener('click', () => this.handleDownload());
+
+    // Panel focus tracking
+    document.getElementById('browserTree').addEventListener('focus', () => {
+      this.activePanel = 'tree';
+      this.updatePanelHighlight();
+    });
+
+    document.getElementById('skillsList').addEventListener('focus', () => {
+      this.activePanel = 'list';
+      this.updatePanelHighlight();
+    });
+  },
+
+  /**
+   * Setup keyboard navigation
+   */
+  setupKeyboardNavigation() {
+    document.addEventListener('keydown', (e) => {
+      const searchInput = document.getElementById('searchInput');
+      const modal = document.getElementById('skillModal');
+
+      // If modal is open, only handle escape
+      if (!modal.hidden) {
+        if (e.key === 'Escape') {
+          this.closeModal();
+        }
+        return;
+      }
+
+      // Search shortcut
+      if (e.key === '/' && document.activeElement !== searchInput) {
+        e.preventDefault();
+        searchInput.focus();
+        return;
+      }
+
+      // If typing in search, don't handle navigation
+      if (document.activeElement === searchInput) {
+        if (e.key === 'Escape') {
+          searchInput.blur();
+          document.getElementById('browserTree').focus();
+        }
+        if (e.key === 'Enter') {
+          searchInput.blur();
+          document.getElementById('skillsList').focus();
+          this.listIndex = 0;
+          this.updateListHighlight();
+        }
+        return;
+      }
+
+      // Navigation keys
+      switch (e.key) {
+        case 'ArrowUp':
+          e.preventDefault();
+          this.navigateUp();
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          this.navigateDown();
+          break;
+        case 'ArrowRight':
+        case 'Tab':
+          if (!e.shiftKey) {
+            e.preventDefault();
+            this.switchToList();
+          }
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          this.switchToTree();
+          break;
+        case 'Enter':
+        case ' ':
+          e.preventDefault();
+          this.selectCurrentItem();
+          break;
+        case 'Escape':
+          this.closeModal();
+          break;
+      }
+    });
+  },
+
+  /**
+   * Navigate up in current panel
+   */
+  navigateUp() {
+    if (this.activePanel === 'tree') {
+      const items = document.querySelectorAll('.tree-item');
+      this.treeIndex = Math.max(0, this.treeIndex - 1);
+      this.updateTreeHighlight();
+    } else {
+      this.listIndex = Math.max(0, this.listIndex - 1);
+      this.updateListHighlight();
+    }
+  },
+
+  /**
+   * Navigate down in current panel
+   */
+  navigateDown() {
+    if (this.activePanel === 'tree') {
+      const items = document.querySelectorAll('.tree-item');
+      this.treeIndex = Math.min(items.length - 1, this.treeIndex + 1);
+      this.updateTreeHighlight();
+    } else {
+      const items = document.querySelectorAll('.list-item');
+      this.listIndex = Math.min(items.length - 1, this.listIndex + 1);
+      this.updateListHighlight();
+    }
+  },
+
+  /**
+   * Switch focus to list panel
+   */
+  switchToList() {
+    this.activePanel = 'list';
+    document.getElementById('skillsList').focus();
+    this.updatePanelHighlight();
+    if (this.filteredSkills.length > 0 && this.listIndex < 0) {
+      this.listIndex = 0;
+      this.updateListHighlight();
+    }
+  },
+
+  /**
+   * Switch focus to tree panel
+   */
+  switchToTree() {
+    this.activePanel = 'tree';
+    document.getElementById('browserTree').focus();
+    this.updatePanelHighlight();
+  },
+
+  /**
+   * Select current item (enter/space)
+   */
+  selectCurrentItem() {
+    if (this.activePanel === 'tree') {
+      const items = document.querySelectorAll('.tree-item');
+      if (items[this.treeIndex]) {
+        this.selectTreeItem(items[this.treeIndex]);
+      }
+    } else {
+      const skill = this.filteredSkills[this.listIndex];
+      if (skill) {
+        this.openSkillModal(skill.id);
+      }
+    }
+  },
+
+  /**
+   * Select a tree item
+   */
+  selectTreeItem(item) {
+    const category = item.dataset.category;
+    const sort = item.dataset.sort;
+
+    if (category) {
+      // Update selected category
+      document.querySelectorAll('.tree-folder').forEach(el => el.classList.remove('selected'));
+      item.classList.add('selected');
+      this.selectedCategory = category;
+      this.updatePath();
+    }
+
+    if (sort) {
+      // Update selected sort
+      document.querySelectorAll('.tree-option').forEach(el => {
+        el.querySelector('.tree-icon').innerHTML = '&#9675;'; // Empty circle
+        el.classList.remove('selected');
+      });
+      item.querySelector('.tree-icon').innerHTML = '&#9679;'; // Filled circle
+      item.classList.add('selected');
+      this.selectedSort = sort;
+    }
+
+    this.applyFilters();
+    this.listIndex = 0;
+  },
+
+  /**
+   * Update tree highlight
+   */
+  updateTreeHighlight() {
+    const items = document.querySelectorAll('.tree-item');
+    items.forEach((item, i) => {
+      item.classList.toggle('active', i === this.treeIndex);
+    });
+
+    // Scroll into view
+    if (items[this.treeIndex]) {
+      items[this.treeIndex].scrollIntoView({ block: 'nearest' });
+    }
+  },
+
+  /**
+   * Update list highlight
+   */
+  updateListHighlight() {
+    const items = document.querySelectorAll('.list-item');
+    items.forEach((item, i) => {
+      item.classList.toggle('active', i === this.listIndex);
+    });
+
+    // Scroll into view
+    if (items[this.listIndex]) {
+      items[this.listIndex].scrollIntoView({ block: 'nearest' });
+    }
+  },
+
+  /**
+   * Update panel highlight styling
+   */
+  updatePanelHighlight() {
+    document.getElementById('browserTree').classList.toggle('focused', this.activePanel === 'tree');
+    document.getElementById('skillsList').classList.toggle('focused', this.activePanel === 'list');
+  },
+
+  /**
+   * Update path display
+   */
+  updatePath() {
+    const pathEl = document.getElementById('browserPath');
+    const catLabel = this.selectedCategory === 'all' ? 'all' : this.selectedCategory;
+    pathEl.innerHTML = `
+      <span class="path-segment path-root">/skills</span>
+      <span class="path-segment">/${catLabel}</span>
+    `;
   },
 
   /**
@@ -138,10 +352,11 @@ const App = {
       this.skills = data.skills || [];
       this.applyFilters();
       this.updateStats(data.stats);
+      this.updateCategoryCounts();
     } catch (err) {
       console.error('Failed to load skills:', err);
-      document.getElementById('skillsGrid').innerHTML = 
-        '<div class="loading">Failed to load skills. Please try again.</div>';
+      document.getElementById('skillsList').innerHTML = 
+        '<div class="list-empty">Failed to load skills</div>';
     }
   },
 
@@ -164,44 +379,26 @@ const App = {
    */
   applyFilters() {
     let filtered = [...this.skills];
-    const { query, category, sort, price } = this.filters;
 
-    // Search query
-    if (query) {
-      const q = query.toLowerCase();
+    // Search
+    if (this.searchQuery) {
+      const q = this.searchQuery.toLowerCase();
       filtered = filtered.filter(skill => {
-        const searchText = `${skill.title} ${skill.description} ${skill.creator} ${skill.tags}`.toLowerCase();
-        return searchText.includes(q);
+        const text = `${skill.title} ${skill.description} ${skill.creator} ${skill.tags}`.toLowerCase();
+        return text.includes(q);
       });
     }
 
-    // Category filter
-    if (category) {
+    // Category
+    if (this.selectedCategory !== 'all') {
       filtered = filtered.filter(skill => {
         const tags = (skill.tags || '').toLowerCase();
-        return tags.includes(category.toLowerCase());
-      });
-    }
-
-    // Price filter
-    if (price) {
-      filtered = filtered.filter(skill => {
-        const p = skill.price;
-        switch (price) {
-          case 'free': return p === 0;
-          case 'under-1': return p > 0 && p < 1;
-          case '1-5': return p >= 1 && p <= 5;
-          case 'over-5': return p > 5;
-          default: return true;
-        }
+        return tags.includes(this.selectedCategory);
       });
     }
 
     // Sort
-    switch (sort) {
-      case 'newest':
-        filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        break;
+    switch (this.selectedSort) {
       case 'popular':
         filtered.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
         break;
@@ -211,125 +408,76 @@ const App = {
       case 'price-high':
         filtered.sort((a, b) => b.price - a.price);
         break;
+      case 'newest':
+      default:
+        filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     }
 
     this.filteredSkills = filtered;
     this.renderSkills();
-    this.renderActiveFilters();
   },
 
   /**
-   * Render skills grid
+   * Render skills list
    */
   renderSkills() {
-    const grid = document.getElementById('skillsGrid');
+    const container = document.getElementById('skillsList');
     const skills = this.filteredSkills;
 
-    // Update count
-    document.getElementById('resultsCount').textContent = skills.length;
-
     if (!skills.length) {
-      grid.innerHTML = `
-        <div class="empty-state">
-          <p>No skills match your search</p>
-          <button class="btn btn-secondary" onclick="App.clearFilters()">Clear Filters</button>
-        </div>
-      `;
+      container.innerHTML = '<div class="list-empty">No skills found</div>';
       return;
     }
 
-    grid.innerHTML = skills.map(skill => {
+    container.innerHTML = skills.map((skill, index) => {
       const isOwned = this.purchases.some(p => p.skillId === skill.id);
-      const tags = (skill.tags || '').split(',').slice(0, 2);
-      const category = tags[0]?.trim() || 'skill';
+      const isActive = index === this.listIndex && this.activePanel === 'list';
       
       return `
-        <article class="skill-card ${isOwned ? 'owned' : ''}" data-id="${skill.id}">
-          <div class="skill-header">
-            <div class="skill-tags">
-              <span class="skill-tag category">${this.escapeHtml(category)}</span>
-              ${tags[1] ? `<span class="skill-tag">${this.escapeHtml(tags[1].trim())}</span>` : ''}
-            </div>
-            <span class="skill-price">${skill.price === 0 ? 'Free' : skill.price + ' SOL'}</span>
-          </div>
-          <h3>${this.escapeHtml(skill.title)}</h3>
-          <p>${this.escapeHtml(skill.description || 'No description')}</p>
-          <div class="skill-footer">
-            <span class="skill-creator">${this.escapeHtml(skill.creator)}</span>
-            <span class="skill-downloads">${skill.downloads || 0} downloads</span>
-          </div>
-        </article>
+        <div class="list-item ${isOwned ? 'owned' : ''} ${isActive ? 'active' : ''}" 
+             data-id="${skill.id}" data-index="${index}">
+          <span class="item-icon">&#9632;</span>
+          <span class="item-name">${this.escapeHtml(skill.title)}</span>
+          <span class="item-creator">${this.escapeHtml(skill.creator)}</span>
+          <span class="item-price">${skill.price === 0 ? 'FREE' : skill.price + ' SOL'}</span>
+          <span class="item-downloads">${skill.downloads || 0}</span>
+        </div>
       `;
     }).join('');
 
     // Click handlers
-    grid.querySelectorAll('.skill-card').forEach(card => {
-      card.addEventListener('click', () => this.openSkillModal(card.dataset.id));
+    container.querySelectorAll('.list-item').forEach((item, index) => {
+      item.addEventListener('click', () => {
+        this.listIndex = index;
+        this.updateListHighlight();
+        this.openSkillModal(item.dataset.id);
+      });
     });
   },
 
   /**
-   * Render active filter tags
+   * Update category counts
    */
-  renderActiveFilters() {
-    const container = document.getElementById('activeFilters');
-    const tags = [];
+  updateCategoryCounts() {
+    document.getElementById('countAll').textContent = this.skills.length;
 
-    if (this.filters.query) {
-      tags.push({ label: `"${this.filters.query}"`, clear: () => {
-        this.filters.query = '';
-        document.getElementById('searchInput').value = '';
-        this.applyFilters();
-      }});
-    }
-
-    if (this.filters.category) {
-      tags.push({ label: this.filters.category, clear: () => {
-        this.filters.category = '';
-        document.getElementById('categoryFilter').value = '';
-        this.applyFilters();
-      }});
-    }
-
-    if (this.filters.price) {
-      const labels = { 'free': 'Free', 'under-1': '<1 SOL', '1-5': '1-5 SOL', 'over-5': '>5 SOL' };
-      tags.push({ label: labels[this.filters.price], clear: () => {
-        this.filters.price = '';
-        document.getElementById('priceFilter').value = '';
-        this.applyFilters();
-      }});
-    }
-
-    container.innerHTML = tags.map((tag, i) => `
-      <span class="filter-tag">
-        ${tag.label}
-        <button onclick="App.clearFilter(${i})">&times;</button>
-      </span>
-    `).join('');
-
-    // Store clear functions
-    this._filterClears = tags.map(t => t.clear);
+    this.categories.slice(1).forEach(cat => {
+      const count = this.skills.filter(s => 
+        (s.tags || '').toLowerCase().includes(cat)
+      ).length;
+      const el = document.getElementById('count' + cat.charAt(0).toUpperCase() + cat.slice(1));
+      if (el) el.textContent = count;
+    });
   },
 
   /**
-   * Clear single filter
+   * Update stats
    */
-  clearFilter(index) {
-    if (this._filterClears && this._filterClears[index]) {
-      this._filterClears[index]();
-    }
-  },
-
-  /**
-   * Clear all filters
-   */
-  clearFilters() {
-    this.filters = { query: '', category: '', sort: 'newest', price: '' };
-    document.getElementById('searchInput').value = '';
-    document.getElementById('categoryFilter').value = '';
-    document.getElementById('sortFilter').value = 'newest';
-    document.getElementById('priceFilter').value = '';
-    this.applyFilters();
+  updateStats(stats) {
+    if (!stats) return;
+    document.getElementById('statTotal').textContent = stats.totalSkills || 0;
+    document.getElementById('statCreators').textContent = stats.totalCreators || 0;
+    document.getElementById('statDownloads').textContent = stats.totalDownloads || 0;
   },
 
   /**
@@ -339,47 +487,19 @@ const App = {
     const grid = document.getElementById('mySkillsGrid');
 
     if (!this.purchases.length) {
-      grid.innerHTML = `
-        <div class="empty-state">
-          <p>No purchases yet</p>
-          <a href="#directory" class="btn btn-secondary">Browse Directory</a>
-        </div>
-      `;
+      grid.innerHTML = '<div class="empty-state"><p>No purchases yet</p></div>';
       return;
     }
 
     grid.innerHTML = this.purchases.map(purchase => `
-      <article class="skill-card owned" data-id="${purchase.skillId}">
-        <div class="skill-header">
-          <span class="skill-tag category">Owned</span>
+      <div class="my-skill-card" data-id="${purchase.skillId}">
+        <h3 style="font-family: VT323; font-size: 20px; margin-bottom: 8px;">${this.escapeHtml(purchase.skillTitle)}</h3>
+        <div style="font-size: 14px; color: var(--text-dim); margin-bottom: 12px;">
+          Purchased: ${new Date(purchase.purchasedAt).toLocaleDateString()}
         </div>
-        <h3>${this.escapeHtml(purchase.skillTitle)}</h3>
-        <div class="skill-footer">
-          <span>${new Date(purchase.purchasedAt).toLocaleDateString()}</span>
-          <button class="btn btn-success" onclick="event.stopPropagation(); App.downloadSkill('${purchase.skillId}')">
-            Download
-          </button>
-        </div>
-      </article>
+        <button class="btn btn-success" onclick="App.downloadSkill('${purchase.skillId}')">DOWNLOAD</button>
+      </div>
     `).join('');
-  },
-
-  /**
-   * Update stats
-   */
-  updateStats(stats) {
-    if (!stats) return;
-    document.getElementById('statSkills').textContent = stats.totalSkills || 0;
-    document.getElementById('statCreators').textContent = stats.totalCreators || 0;
-    document.getElementById('statDownloads').textContent = stats.totalDownloads || 0;
-    
-    // Count unique categories
-    const categories = new Set();
-    this.skills.forEach(s => {
-      const cat = (s.tags || '').split(',')[0]?.trim();
-      if (cat) categories.add(cat.toLowerCase());
-    });
-    document.getElementById('statCategories').textContent = categories.size;
   },
 
   /**
@@ -393,18 +513,16 @@ const App = {
     const isOwned = this.purchases.some(p => p.skillId === skillId);
     const tags = (skill.tags || '').split(',').map(t => t.trim()).filter(Boolean);
 
-    // Populate
-    document.getElementById('modalTags').innerHTML = tags.map(t => 
+    document.getElementById('modalTags').innerHTML = tags.slice(0, 3).map(t => 
       `<span class="skill-tag">${this.escapeHtml(t)}</span>`
     ).join('');
-    document.getElementById('modalPrice').textContent = skill.price === 0 ? 'Free' : skill.price + ' SOL';
+    document.getElementById('modalPrice').textContent = skill.price === 0 ? 'FREE' : skill.price + ' SOL';
     document.getElementById('modalTitle').textContent = skill.title;
-    document.getElementById('modalDesc').textContent = skill.description || 'No description provided.';
+    document.getElementById('modalDesc').textContent = skill.description || 'No description.';
     document.getElementById('modalCreator').textContent = skill.creator;
     document.getElementById('modalDownloads').textContent = skill.downloads || 0;
     document.getElementById('modalDate').textContent = new Date(skill.createdAt).toLocaleDateString();
 
-    // Buttons
     const purchaseBtn = document.getElementById('modalPurchaseBtn');
     const downloadBtn = document.getElementById('modalDownloadBtn');
 
@@ -414,7 +532,7 @@ const App = {
     } else {
       purchaseBtn.hidden = false;
       downloadBtn.hidden = true;
-      purchaseBtn.textContent = Wallet.address ? 'Purchase' : 'Connect Wallet';
+      purchaseBtn.textContent = Wallet.address ? 'PURCHASE' : 'CONNECT WALLET';
     }
 
     document.getElementById('modalStatus').hidden = true;
@@ -427,6 +545,12 @@ const App = {
   closeModal() {
     document.getElementById('skillModal').hidden = true;
     this.currentSkill = null;
+    // Refocus browser
+    if (this.activePanel === 'list') {
+      document.getElementById('skillsList').focus();
+    } else {
+      document.getElementById('browserTree').focus();
+    }
   },
 
   /**
@@ -450,7 +574,7 @@ const App = {
 
     try {
       if (!this.currentSkill.creatorWallet) {
-        throw new Error('Creator has not set a payment wallet');
+        throw new Error('Creator has not set a wallet');
       }
 
       statusEl.textContent = 'Confirm in Phantom...';
@@ -493,7 +617,7 @@ const App = {
   },
 
   /**
-   * Handle download from modal
+   * Handle download
    */
   async handleDownload() {
     if (!this.currentSkill) return;
@@ -537,7 +661,7 @@ const App = {
 
     const uploadBtn = document.getElementById('uploadBtn');
     uploadBtn.disabled = true;
-    uploadBtn.textContent = 'Uploading...';
+    uploadBtn.textContent = 'UPLOADING...';
 
     try {
       const skillData = {
@@ -550,7 +674,6 @@ const App = {
         creatorWallet: Wallet.address
       };
 
-      // Add category to tags if selected
       const category = document.getElementById('skillCategory').value;
       if (category && !skillData.tags.toLowerCase().includes(category)) {
         skillData.tags = category + ', ' + skillData.tags;
@@ -560,7 +683,7 @@ const App = {
       document.getElementById('uploadForm').reset();
       await this.loadSkills();
       
-      alert('Skill uploaded successfully!');
+      alert('Skill uploaded!');
       window.location.hash = '#directory';
 
     } catch (err) {
@@ -569,7 +692,7 @@ const App = {
     }
 
     uploadBtn.disabled = false;
-    uploadBtn.textContent = 'Upload Skill';
+    uploadBtn.textContent = 'UPLOAD SKILL';
   },
 
   /**
