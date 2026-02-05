@@ -7,22 +7,11 @@ const App = {
   purchases: [],
   
   // State
-  selectedCategory: null,
-  selectedTag: null,
+  selectedCategory: 'all',
   searchQuery: '',
   selectedIndex: 0,
   filteredSkills: [],
-
-  categories: [
-    { id: 'all', name: 'all', icon: '*' },
-    { id: 'security', name: 'security', icon: '!' },
-    { id: 'automation', name: 'automation', icon: '>' },
-    { id: 'data', name: 'data', icon: '#' },
-    { id: 'blockchain', name: 'blockchain', icon: '$' },
-    { id: 'llm', name: 'llm', icon: '@' },
-    { id: 'devops', name: 'devops', icon: '%' },
-    { id: 'other', name: 'other', icon: '?' }
-  ],
+  currentSkill: null,
 
   async init() {
     Wallet.onConnect = (addr) => this.onWalletConnect(addr);
@@ -31,10 +20,6 @@ const App = {
     this.bindEvents();
     await Wallet.checkConnection();
     await this.loadSkills();
-    
-    this.renderCategories();
-    this.renderPopularTags();
-    this.renderTree();
   },
 
   bindEvents() {
@@ -54,46 +39,51 @@ const App = {
       }
     });
 
-    // Buttons
+    // Category buttons
+    document.querySelectorAll('.cat-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.selectedCategory = btn.dataset.cat;
+        this.selectedIndex = 0;
+        this.updateCategoryButtons();
+        this.filterAndRender();
+      });
+    });
+
+    // Wallet button
     document.getElementById('walletBtn').addEventListener('click', () => {
       Wallet.address ? Wallet.disconnect() : Wallet.connect();
     });
 
-    document.getElementById('uploadBtn').addEventListener('click', () => {
-      if (!Wallet.address) {
-        Wallet.connect().then(() => {
-          if (Wallet.address) this.showUploadModal();
-        });
-      } else {
-        this.showUploadModal();
-      }
+    // Upload connect button
+    document.getElementById('uploadConnectBtn').addEventListener('click', () => {
+      Wallet.connect();
     });
 
-    document.getElementById('randomBtn').addEventListener('click', () => {
-      this.showRandomSkill();
-    });
-
-    // Modals
-    document.getElementById('modalClose').addEventListener('click', () => {
-      this.closeSkillModal();
-    });
-
-    document.getElementById('uploadClose').addEventListener('click', () => {
-      this.closeUploadModal();
-    });
-
-    document.getElementById('uploadCancel').addEventListener('click', () => {
-      this.closeUploadModal();
-    });
-
+    // Upload form
     document.getElementById('uploadForm').addEventListener('submit', (e) => {
       e.preventDefault();
       this.handleUpload();
     });
 
+    // Modal
+    document.getElementById('modalClose').addEventListener('click', () => {
+      this.closeModal();
+    });
+
+    document.querySelector('.modal-backdrop').addEventListener('click', () => {
+      this.closeModal();
+    });
+
+    document.getElementById('modalPurchaseBtn').addEventListener('click', () => {
+      this.handlePurchase();
+    });
+
+    document.getElementById('modalDownloadBtn').addEventListener('click', () => {
+      this.handleDownload();
+    });
+
     // Keyboard navigation
     document.addEventListener('keydown', (e) => {
-      // Don't capture when typing
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
         return;
       }
@@ -112,22 +102,13 @@ const App = {
           this.selectCurrent();
           break;
         case 'Escape':
-          this.closeAllModals();
+          this.closeModal();
           break;
         case '/':
           e.preventDefault();
           document.getElementById('searchInput').focus();
           break;
       }
-    });
-
-    // Click outside modal to close
-    document.getElementById('skillModal').addEventListener('click', (e) => {
-      if (e.target.id === 'skillModal') this.closeSkillModal();
-    });
-
-    document.getElementById('uploadModal').addEventListener('click', (e) => {
-      if (e.target.id === 'uploadModal') this.closeUploadModal();
     });
   },
 
@@ -137,10 +118,19 @@ const App = {
     try {
       const data = await API.getSkills();
       this.skills = data.skills || [];
+      
+      // Update stats
       document.getElementById('statSkills').textContent = this.skills.length;
+      const creators = new Set(this.skills.map(s => s.creator));
+      document.getElementById('statCreators').textContent = creators.size;
+      const downloads = this.skills.reduce((sum, s) => sum + (s.downloads || 0), 0);
+      document.getElementById('statDownloads').textContent = downloads;
+      
       this.filterAndRender();
     } catch (err) {
       console.error('Failed to load skills:', err);
+      document.getElementById('treeView').innerHTML = 
+        '<div class="empty-state">Failed to load skills</div>';
     }
   },
 
@@ -149,6 +139,8 @@ const App = {
     try {
       const data = await API.getPurchases(Wallet.address);
       this.purchases = data.purchases || [];
+      this.filterAndRender();
+      this.renderMySkills();
     } catch (err) {
       console.error('Failed to load purchases:', err);
     }
@@ -167,14 +159,6 @@ const App = {
       });
     }
 
-    // Tag filter
-    if (this.selectedTag) {
-      filtered = filtered.filter(s => {
-        const tags = (s.tags || '').toLowerCase();
-        return tags.includes(this.selectedTag);
-      });
-    }
-
     // Search filter
     if (this.searchQuery) {
       filtered = filtered.filter(s => {
@@ -190,94 +174,35 @@ const App = {
     this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, filtered.length - 1));
     
     this.renderTree();
-    this.updateTreeHeader();
+    this.updateResultsInfo();
   },
 
-  updateTreeHeader() {
+  updateCategoryButtons() {
+    document.querySelectorAll('.cat-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.cat === this.selectedCategory);
+    });
+  },
+
+  updateResultsInfo() {
     let path = 'skills/';
-    if (this.selectedCategory && this.selectedCategory !== 'all') {
+    if (this.selectedCategory !== 'all') {
       path += this.selectedCategory + '/';
-    }
-    if (this.selectedTag) {
-      path += '#' + this.selectedTag + '/';
     }
     if (this.searchQuery) {
       path += '?' + this.searchQuery;
     }
     
-    document.getElementById('treePath').textContent = path;
-    document.getElementById('treeCount').textContent = `(${this.filteredSkills.length})`;
+    document.getElementById('resultsPath').textContent = path;
+    document.getElementById('resultsCount').textContent = this.filteredSkills.length;
   },
 
   // === RENDER ===
-
-  renderCategories() {
-    const container = document.getElementById('tagCloud');
-    container.innerHTML = '';
-
-    this.categories.forEach(cat => {
-      const count = cat.id === 'all' 
-        ? this.skills.length 
-        : this.skills.filter(s => (s.tags || '').toLowerCase().includes(cat.id)).length;
-
-      const el = document.createElement('div');
-      el.className = `tag-item ${this.selectedCategory === cat.id || (!this.selectedCategory && cat.id === 'all') ? 'active' : ''}`;
-      el.innerHTML = `
-        <span class="tag-prefix">${cat.icon}</span>
-        <span class="tag-name">${cat.name}/</span>
-        <span class="tag-count">${count}</span>
-      `;
-      el.addEventListener('click', () => {
-        this.selectedCategory = cat.id === 'all' ? null : cat.id;
-        this.selectedTag = null;
-        this.selectedIndex = 0;
-        this.renderCategories();
-        this.filterAndRender();
-      });
-      container.appendChild(el);
-    });
-  },
-
-  renderPopularTags() {
-    // Collect all tags
-    const tagCounts = {};
-    this.skills.forEach(s => {
-      const tags = (s.tags || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
-      tags.forEach(t => {
-        // Skip category names
-        if (!this.categories.find(c => c.id === t)) {
-          tagCounts[t] = (tagCounts[t] || 0) + 1;
-        }
-      });
-    });
-
-    // Sort by count and take top 10
-    const sorted = Object.entries(tagCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10);
-
-    const container = document.getElementById('popularTags');
-    container.innerHTML = '';
-
-    sorted.forEach(([tag, count]) => {
-      const el = document.createElement('span');
-      el.className = `pop-tag ${this.selectedTag === tag ? 'active' : ''}`;
-      el.textContent = '#' + tag;
-      el.addEventListener('click', () => {
-        this.selectedTag = this.selectedTag === tag ? null : tag;
-        this.selectedIndex = 0;
-        this.renderPopularTags();
-        this.filterAndRender();
-      });
-      container.appendChild(el);
-    });
-  },
 
   renderTree() {
     const container = document.getElementById('treeView');
     
     if (this.filteredSkills.length === 0) {
-      container.innerHTML = '<div class="tree-empty">no skills found</div>';
+      container.innerHTML = '<div class="empty-state">No skills found</div>';
       return;
     }
 
@@ -289,28 +214,56 @@ const App = {
       const isOwned = this.purchases.some(p => p.skillId === skill.id);
       const isFree = skill.price === 0;
 
-      const prefix = isLast ? '\\-- ' : '|-- ';
+      const prefix = isLast ? '\\--' : '|--';
 
       const el = document.createElement('div');
-      el.className = `tree-node ${isSelected ? 'selected' : ''}`;
+      el.className = `tree-node ${isSelected ? 'selected' : ''} ${isOwned ? 'owned' : ''}`;
       el.dataset.index = index;
       
       el.innerHTML = `
         <span class="tree-prefix">${prefix}</span>
         <span class="tree-name">${this.escapeHtml(skill.title)}</span>
         <div class="tree-meta">
-          ${isOwned ? '<span class="tree-owned">[owned]</span>' : ''}
-          <span class="tree-price ${isFree ? 'free' : ''}">${isFree ? 'free' : skill.price + ' SOL'}</span>
-          <span class="tree-downloads">${skill.downloads || 0} dl</span>
+          ${isOwned ? '<span class="tree-owned">OWNED</span>' : ''}
+          <span class="tree-price ${isFree ? 'free' : ''}">${isFree ? 'FREE' : skill.price + ' SOL'}</span>
+          <span class="tree-downloads">${skill.downloads || 0} downloads</span>
         </div>
       `;
 
       el.addEventListener('click', () => {
         this.selectedIndex = index;
         this.renderTree();
-        this.showSkillDetail(skill);
+        this.showSkillModal(skill);
       });
 
+      container.appendChild(el);
+    });
+  },
+
+  renderMySkills() {
+    const container = document.getElementById('mySkillsList');
+    
+    if (this.purchases.length === 0) {
+      container.innerHTML = '<div class="empty-state"><p>No purchases yet</p></div>';
+      return;
+    }
+
+    container.innerHTML = '';
+    
+    this.purchases.forEach(purchase => {
+      const skill = this.skills.find(s => s.id === purchase.skillId);
+      if (!skill) return;
+
+      const el = document.createElement('div');
+      el.className = 'tree-node owned';
+      el.innerHTML = `
+        <span class="tree-prefix">*</span>
+        <span class="tree-name">${this.escapeHtml(skill.title)}</span>
+        <div class="tree-meta">
+          <span class="tree-owned">OWNED</span>
+        </div>
+      `;
+      el.addEventListener('click', () => this.showSkillModal(skill));
       container.appendChild(el);
     });
   },
@@ -322,7 +275,6 @@ const App = {
     this.selectedIndex = Math.max(0, Math.min(max, this.selectedIndex + delta));
     this.renderTree();
     
-    // Scroll into view
     const selected = document.querySelector('.tree-node.selected');
     if (selected) {
       selected.scrollIntoView({ block: 'nearest' });
@@ -332,91 +284,93 @@ const App = {
   selectCurrent() {
     const skill = this.filteredSkills[this.selectedIndex];
     if (skill) {
-      this.showSkillDetail(skill);
+      this.showSkillModal(skill);
     }
   },
 
-  // === SKILL DETAIL ===
+  // === MODAL ===
 
-  showSkillDetail(skill) {
+  showSkillModal(skill) {
+    this.currentSkill = skill;
     const modal = document.getElementById('skillModal');
-    const title = document.getElementById('modalTitle');
-    const body = document.getElementById('modalBody');
-
     const isOwned = this.purchases.some(p => p.skillId === skill.id);
     const isFree = skill.price === 0;
     const tags = (skill.tags || '').split(',').map(t => t.trim()).filter(Boolean);
 
-    title.textContent = skill.title;
-    body.innerHTML = `
-      <div class="skill-detail">
-        <div class="skill-creator">by ${this.escapeHtml(skill.creator)}</div>
-        <div class="skill-stats">
-          <span class="skill-stat">price: <span class="${isFree ? 'free' : ''}">${isFree ? 'free' : skill.price + ' SOL'}</span></span>
-          <span class="skill-stat">downloads: <span>${skill.downloads || 0}</span></span>
-        </div>
-        <div class="skill-desc">${this.escapeHtml(skill.description || 'No description provided.')}</div>
-        <div class="skill-tags">
-          ${tags.map(t => `<span class="skill-tag">#${this.escapeHtml(t)}</span>`).join('')}
-        </div>
-        <div class="skill-actions">
-          ${isOwned || isFree
-            ? `<button class="btn-primary" id="actionBtn">[download]</button>`
-            : `<button class="btn-primary" id="actionBtn">[${Wallet.address ? 'purchase' : 'connect to purchase'}]</button>`
-          }
-        </div>
-        <div class="skill-status" id="actionStatus" hidden></div>
-      </div>
-    `;
+    // Tags
+    document.getElementById('modalTags').innerHTML = tags.map((t, i) => 
+      `<span class="skill-tag ${i === 0 ? 'category' : ''}">${this.escapeHtml(t)}</span>`
+    ).join('');
+
+    // Price
+    document.getElementById('modalPrice').textContent = isFree ? 'FREE' : skill.price + ' SOL';
+
+    // Title & desc
+    document.getElementById('modalTitle').textContent = skill.title;
+    document.getElementById('modalDesc').textContent = skill.description || 'No description provided.';
+
+    // Meta
+    document.getElementById('modalCreator').textContent = skill.creator;
+    document.getElementById('modalDownloads').textContent = skill.downloads || 0;
+    document.getElementById('modalDate').textContent = skill.createdAt 
+      ? new Date(skill.createdAt).toLocaleDateString() 
+      : 'Unknown';
+
+    // Buttons
+    const purchaseBtn = document.getElementById('modalPurchaseBtn');
+    const downloadBtn = document.getElementById('modalDownloadBtn');
+    const statusEl = document.getElementById('modalStatus');
+
+    statusEl.hidden = true;
+
+    if (isOwned || isFree) {
+      purchaseBtn.hidden = true;
+      downloadBtn.hidden = false;
+    } else {
+      purchaseBtn.hidden = false;
+      downloadBtn.hidden = true;
+      purchaseBtn.textContent = Wallet.address ? 'Purchase' : 'Connect Wallet';
+    }
 
     modal.hidden = false;
-
-    document.getElementById('actionBtn').addEventListener('click', () => {
-      if (isOwned || isFree) {
-        this.handleDownload(skill);
-      } else if (!Wallet.address) {
-        Wallet.connect().then(() => {
-          if (Wallet.address) {
-            this.closeSkillModal();
-            this.showSkillDetail(skill);
-          }
-        });
-      } else {
-        this.handlePurchase(skill);
-      }
-    });
   },
 
-  closeSkillModal() {
+  closeModal() {
     document.getElementById('skillModal').hidden = true;
-  },
-
-  showRandomSkill() {
-    if (this.skills.length === 0) return;
-    const skill = this.skills[Math.floor(Math.random() * this.skills.length)];
-    this.showSkillDetail(skill);
+    this.currentSkill = null;
   },
 
   // === PURCHASE ===
 
-  async handlePurchase(skill) {
-    const statusEl = document.getElementById('actionStatus');
-    const btn = document.getElementById('actionBtn');
+  async handlePurchase() {
+    if (!this.currentSkill) return;
+
+    if (!Wallet.address) {
+      await Wallet.connect();
+      if (Wallet.address) {
+        this.showSkillModal(this.currentSkill);
+      }
+      return;
+    }
+
+    const skill = this.currentSkill;
+    const statusEl = document.getElementById('modalStatus');
+    const btn = document.getElementById('modalPurchaseBtn');
 
     statusEl.hidden = false;
-    statusEl.className = 'skill-status';
-    statusEl.textContent = 'creating transaction...';
+    statusEl.className = 'modal-status loading';
+    statusEl.textContent = 'Creating transaction...';
     btn.disabled = true;
 
     try {
       if (!skill.creatorWallet) {
-        throw new Error('creator has not set a wallet');
+        throw new Error('Creator has not set a wallet');
       }
 
-      statusEl.textContent = 'confirm in phantom...';
+      statusEl.textContent = 'Confirm in Phantom...';
       const sig = await Solana.executePurchase(skill.creatorWallet, skill.price);
 
-      statusEl.textContent = 'recording purchase...';
+      statusEl.textContent = 'Recording purchase...';
       await API.createPurchase({
         buyerWallet: Wallet.address,
         skillId: skill.id,
@@ -425,8 +379,8 @@ const App = {
         pricePaid: skill.price
       });
 
-      statusEl.className = 'skill-status success';
-      statusEl.textContent = 'purchase successful!';
+      statusEl.className = 'modal-status success';
+      statusEl.textContent = 'Purchase successful!';
 
       this.purchases.push({
         skillId: skill.id,
@@ -435,27 +389,30 @@ const App = {
       });
 
       setTimeout(() => {
-        this.closeSkillModal();
-        this.showSkillDetail(skill);
+        this.closeModal();
+        this.showSkillModal(skill);
+        this.renderTree();
+        this.renderMySkills();
       }, 1500);
 
     } catch (err) {
       console.error('Purchase failed:', err);
-      statusEl.className = 'skill-status error';
-      statusEl.textContent = err.message || 'purchase failed';
+      statusEl.className = 'modal-status error';
+      statusEl.textContent = err.message || 'Purchase failed';
       btn.disabled = false;
     }
   },
 
-  async handleDownload(skill) {
+  async handleDownload() {
+    if (!this.currentSkill) return;
+    const skill = this.currentSkill;
+
     try {
       let content;
       if (skill.price === 0) {
-        // Free skill - get content directly
         const fullSkill = await API.getSkill(skill.id);
         content = fullSkill.content;
       } else {
-        // Paid skill - need ownership check
         content = await API.getSkillContent(skill.id, Wallet.address);
       }
       
@@ -471,25 +428,15 @@ const App = {
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Download failed:', err);
-      alert(err.message || 'download failed');
+      alert(err.message || 'Download failed');
     }
   },
 
   // === UPLOAD ===
 
-  showUploadModal() {
-    document.getElementById('uploadModal').hidden = false;
-    document.getElementById('skillTitle').focus();
-  },
-
-  closeUploadModal() {
-    document.getElementById('uploadModal').hidden = true;
-    document.getElementById('uploadForm').reset();
-  },
-
   async handleUpload() {
     const btn = document.querySelector('#uploadForm button[type="submit"]');
-    btn.textContent = '[uploading...]';
+    btn.textContent = 'Uploading...';
     btn.disabled = true;
 
     try {
@@ -505,40 +452,50 @@ const App = {
       };
 
       await API.createSkill(data);
-      this.closeUploadModal();
+      document.getElementById('uploadForm').reset();
       await this.loadSkills();
-      this.renderCategories();
-      this.renderPopularTags();
+      
+      // Scroll to directory
+      document.getElementById('directory').scrollIntoView({ behavior: 'smooth' });
 
     } catch (err) {
       console.error('Upload failed:', err);
-      alert(err.message || 'upload failed');
+      alert(err.message || 'Upload failed');
     }
 
-    btn.textContent = '[submit]';
+    btn.textContent = 'Upload Skill';
     btn.disabled = false;
-  },
-
-  // === MODALS ===
-
-  closeAllModals() {
-    this.closeSkillModal();
-    this.closeUploadModal();
   },
 
   // === WALLET ===
 
   onWalletConnect(addr) {
-    document.getElementById('walletStatus').textContent = Wallet.shortenAddress(addr);
-    document.getElementById('walletStatus').classList.add('connected');
-    document.getElementById('walletBtn').textContent = '[disconnect]';
-    this.loadPurchases().then(() => this.renderTree());
+    const btn = document.getElementById('walletBtn');
+    btn.querySelector('.wallet-text').textContent = Wallet.shortenAddress(addr);
+    btn.classList.add('connected');
+    
+    // Show auth elements
+    document.querySelectorAll('[data-auth]').forEach(el => el.hidden = false);
+    
+    // Hide upload notice, show form
+    document.getElementById('uploadNotice').hidden = true;
+    document.getElementById('uploadFormContainer').hidden = false;
+    
+    this.loadPurchases();
   },
 
   onWalletDisconnect() {
-    document.getElementById('walletStatus').textContent = 'not connected';
-    document.getElementById('walletStatus').classList.remove('connected');
-    document.getElementById('walletBtn').textContent = '[connect]';
+    const btn = document.getElementById('walletBtn');
+    btn.querySelector('.wallet-text').textContent = 'Connect Wallet';
+    btn.classList.remove('connected');
+    
+    // Hide auth elements
+    document.querySelectorAll('[data-auth]').forEach(el => el.hidden = true);
+    
+    // Show upload notice, hide form
+    document.getElementById('uploadNotice').hidden = false;
+    document.getElementById('uploadFormContainer').hidden = true;
+    
     this.purchases = [];
     this.renderTree();
   },
