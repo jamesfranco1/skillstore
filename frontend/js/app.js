@@ -1,467 +1,621 @@
 /**
- * Skillstore - Terminal Tree Browser
+ * Skillstore - Command Line Interface
  */
 
 const App = {
   skills: [],
   purchases: [],
-  tree: [],
-  flatTree: [],
-  selectedIndex: 0,
-  expandedNodes: new Set(['root']),
-  searchQuery: '',
+  
+  // View state
+  view: 'home', // 'home', 'tree', 'skill', 'search', 'upload'
+  treeData: [],
+  treeExpanded: new Set(),
+  selectedIndex: -1,
+  currentSkill: null,
+  commandHistory: [],
+  historyIndex: -1,
 
-  categories: [
-    { id: 'security', label: 'security' },
-    { id: 'automation', label: 'automation' },
-    { id: 'data', label: 'data' },
-    { id: 'blockchain', label: 'blockchain' },
-    { id: 'llm', label: 'llm' },
-    { id: 'devops', label: 'devops' },
-    { id: 'other', label: 'other' }
-  ],
+  categories: ['security', 'automation', 'data', 'blockchain', 'llm', 'devops', 'other'],
 
   async init() {
     Wallet.onConnect = (addr) => this.onWalletConnect(addr);
     Wallet.onDisconnect = () => this.onWalletDisconnect();
 
     this.setupEventListeners();
-    this.setupKeyboard();
-
     await Wallet.checkConnection();
     await this.loadSkills();
-
-    document.getElementById('treeContainer').focus();
   },
 
   setupEventListeners() {
+    const cli = document.getElementById('cliInput');
+    
+    cli.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.executeCommand(cli.value.trim());
+        cli.value = '';
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.navigateHistory(-1, cli);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        this.navigateHistory(1, cli);
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      const cli = document.getElementById('cliInput');
+      
+      // Don't capture if typing in input
+      if (document.activeElement.tagName === 'INPUT' || 
+          document.activeElement.tagName === 'TEXTAREA' ||
+          document.activeElement.tagName === 'SELECT') {
+        if (e.key === 'Escape') {
+          cli.blur();
+          if (this.view === 'upload') {
+            this.hideUpload();
+          }
+        }
+        return;
+      }
+
+      switch (e.key) {
+        case 'ArrowUp':
+          e.preventDefault();
+          this.navigateTree(-1);
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          this.navigateTree(1);
+          break;
+        case 'Enter':
+          e.preventDefault();
+          this.selectTreeItem();
+          break;
+        case 'Escape':
+        case 'Backspace':
+          e.preventDefault();
+          this.goBack();
+          break;
+        case '/':
+          e.preventDefault();
+          cli.focus();
+          break;
+      }
+    });
+
     document.getElementById('walletBtn').addEventListener('click', () => {
       Wallet.address ? Wallet.disconnect() : Wallet.connect();
     });
 
-    document.getElementById('searchInput').addEventListener('input', (e) => {
-      this.searchQuery = e.target.value.toLowerCase();
-      this.buildTree();
-      this.render();
+    document.getElementById('uploadCancel').addEventListener('click', () => {
+      this.hideUpload();
     });
 
-    document.getElementById('detailBack').addEventListener('click', () => this.closeDetail());
-    document.getElementById('detailPurchase').addEventListener('click', () => this.handlePurchase());
-    document.getElementById('detailDownload').addEventListener('click', () => this.handleDownload());
-
-    document.getElementById('uploadBack').addEventListener('click', () => this.closeUpload());
     document.getElementById('uploadForm').addEventListener('submit', (e) => {
       e.preventDefault();
       this.handleUpload();
     });
   },
 
-  setupKeyboard() {
-    document.addEventListener('keydown', (e) => {
-      const searchInput = document.getElementById('searchInput');
-      const detailPanel = document.getElementById('detailPanel');
-      const uploadPanel = document.getElementById('uploadPanel');
-
-      // If panels are open
-      if (!detailPanel.hidden) {
-        if (e.key === 'Escape' || e.key === 'Backspace') {
-          e.preventDefault();
-          this.closeDetail();
-        }
-        return;
-      }
-
-      if (!uploadPanel.hidden) {
-        if (e.key === 'Escape') {
-          this.closeUpload();
-        }
-        return;
-      }
-
-      // Search focus
-      if (e.key === '/' && document.activeElement !== searchInput) {
-        e.preventDefault();
-        searchInput.focus();
-        return;
-      }
-
-      // Exit search
-      if (document.activeElement === searchInput) {
-        if (e.key === 'Escape') {
-          searchInput.blur();
-          document.getElementById('treeContainer').focus();
-        }
-        return;
-      }
-
-      // Upload shortcut
-      if (e.key === 'u' || e.key === 'U') {
-        e.preventDefault();
-        this.openUpload();
-        return;
-      }
-
-      // Navigation
-      switch (e.key) {
-        case 'ArrowUp':
-        case 'k':
-          e.preventDefault();
-          this.navigate(-1);
-          break;
-        case 'ArrowDown':
-        case 'j':
-          e.preventDefault();
-          this.navigate(1);
-          break;
-        case 'ArrowRight':
-        case 'l':
-          e.preventDefault();
-          this.expandSelected();
-          break;
-        case 'ArrowLeft':
-        case 'h':
-          e.preventDefault();
-          this.collapseSelected();
-          break;
-        case 'Enter':
-          e.preventDefault();
-          this.selectCurrent();
-          break;
-        case 'Home':
-          e.preventDefault();
-          this.selectedIndex = 0;
-          this.render();
-          break;
-        case 'End':
-          e.preventDefault();
-          this.selectedIndex = this.flatTree.length - 1;
-          this.render();
-          break;
-        case 'PageUp':
-          e.preventDefault();
-          this.navigate(-10);
-          break;
-        case 'PageDown':
-          e.preventDefault();
-          this.navigate(10);
-          break;
-      }
-    });
-  },
-
-  navigate(delta) {
-    this.selectedIndex = Math.max(0, Math.min(this.flatTree.length - 1, this.selectedIndex + delta));
-    this.render();
-    this.scrollToSelected();
-  },
-
-  scrollToSelected() {
-    const row = document.querySelector('.tree-row.selected');
-    if (row) {
-      row.scrollIntoView({ block: 'nearest' });
-    }
-  },
-
-  expandSelected() {
-    const node = this.flatTree[this.selectedIndex];
-    if (node && node.type === 'category') {
-      this.expandedNodes.add(node.id);
-      this.buildFlatTree();
-      this.render();
-    } else if (node && node.type === 'skill') {
-      this.openDetail(node.skill);
-    }
-  },
-
-  collapseSelected() {
-    const node = this.flatTree[this.selectedIndex];
-    if (node && node.type === 'category' && this.expandedNodes.has(node.id)) {
-      this.expandedNodes.delete(node.id);
-      this.buildFlatTree();
-      this.render();
-    } else if (node && node.parentId) {
-      // Go to parent
-      const parentIndex = this.flatTree.findIndex(n => n.id === node.parentId);
-      if (parentIndex >= 0) {
-        this.selectedIndex = parentIndex;
-        this.render();
-      }
-    }
-  },
-
-  selectCurrent() {
-    const node = this.flatTree[this.selectedIndex];
-    if (!node) return;
-
-    if (node.type === 'category') {
-      if (this.expandedNodes.has(node.id)) {
-        this.expandedNodes.delete(node.id);
-      } else {
-        this.expandedNodes.add(node.id);
-      }
-      this.buildFlatTree();
-      this.render();
-    } else if (node.type === 'skill') {
-      this.openDetail(node.skill);
-    }
-  },
-
-  async loadSkills() {
-    try {
-      const data = await API.getSkills();
-      this.skills = data.skills || [];
-      this.buildTree();
-      this.render();
-      this.updateStats(data.stats);
-    } catch (err) {
-      console.error('Failed to load skills:', err);
-      document.getElementById('treeContainer').innerHTML = 
-        '<div class="tree-loading">Failed to load skills</div>';
-    }
-  },
-
-  async loadPurchases() {
-    if (!Wallet.address) return;
-    try {
-      const data = await API.getPurchases(Wallet.address);
-      this.purchases = data.purchases || [];
-      this.render();
-    } catch (err) {
-      console.error('Failed to load purchases:', err);
-    }
-  },
-
-  buildTree() {
-    // Group skills by category
-    const categorized = {};
+  navigateHistory(delta, input) {
+    if (this.commandHistory.length === 0) return;
     
-    this.categories.forEach(cat => {
-      categorized[cat.id] = [];
-    });
+    this.historyIndex = Math.max(-1, Math.min(
+      this.commandHistory.length - 1,
+      this.historyIndex + delta
+    ));
+    
+    if (this.historyIndex >= 0) {
+      input.value = this.commandHistory[this.historyIndex];
+    } else {
+      input.value = '';
+    }
+  },
+
+  executeCommand(cmd) {
+    if (!cmd) return;
+
+    this.commandHistory.unshift(cmd);
+    this.historyIndex = -1;
+
+    const parts = cmd.toLowerCase().split(/\s+/);
+    const command = parts[0];
+    const args = parts.slice(1).join(' ');
+
+    switch (command) {
+      case 'help':
+      case '?':
+        this.showHelp();
+        break;
+      case 'tree':
+      case 'ls':
+      case 'dir':
+        this.showTree();
+        break;
+      case 'find':
+      case 'search':
+      case 'grep':
+        this.search(args);
+        break;
+      case 'cd':
+        this.cdCategory(args);
+        break;
+      case 'cat':
+      case 'open':
+      case 'view':
+        this.viewSkill(args);
+        break;
+      case 'clear':
+      case 'cls':
+        this.clearOutput();
+        break;
+      case 'upload':
+      case 'new':
+        this.showUpload();
+        break;
+      case 'connect':
+        Wallet.connect();
+        break;
+      case 'disconnect':
+        Wallet.disconnect();
+        break;
+      case 'random':
+        this.randomSkill();
+        break;
+      case 'top':
+        this.topSkills(parseInt(args) || 10);
+        break;
+      case 'home':
+        this.goHome();
+        break;
+      default:
+        this.output(`command not found: ${command}`, 'dim');
+        this.output(`type 'help' for available commands`, 'dim');
+    }
+  },
+
+  showHelp() {
+    this.clearOutput();
+    this.output('Available commands:', 'bright');
+    this.output('');
+    this.output('  tree, ls        Show skill directory tree');
+    this.output('  cd <category>   Browse category (security, llm, etc)');
+    this.output('  find <query>    Search skills');
+    this.output('  cat <name>      View skill details');
+    this.output('  top [n]         Show top n downloaded skills');
+    this.output('  random          Show a random skill');
+    this.output('  upload          Upload a new skill');
+    this.output('  connect         Connect Solana wallet');
+    this.output('  clear           Clear output');
+    this.output('  home            Go back to start');
+    this.output('');
+    this.output('Navigation:', 'dim');
+    this.output('  Up/Down arrows to navigate tree');
+    this.output('  Enter to select, Esc to go back');
+  },
+
+  showTree(category = null) {
+    this.view = 'tree';
+    this.selectedIndex = 0;
+    this.treeExpanded = new Set(category ? [category] : []);
+    
+    this.buildTreeData(category);
+    this.renderTree();
+  },
+
+  buildTreeData(filterCategory = null) {
+    this.treeData = [];
+
+    // Group skills by category
+    const grouped = {};
+    this.categories.forEach(cat => grouped[cat] = []);
 
     this.skills.forEach(skill => {
-      // Filter by search
-      if (this.searchQuery) {
-        const text = `${skill.title} ${skill.description} ${skill.creator} ${skill.tags}`.toLowerCase();
-        if (!text.includes(this.searchQuery)) return;
-      }
-
-      // Find category
       const tags = (skill.tags || '').toLowerCase();
       let placed = false;
       
       for (const cat of this.categories) {
-        if (cat.id !== 'other' && tags.includes(cat.id)) {
-          categorized[cat.id].push(skill);
+        if (cat !== 'other' && tags.includes(cat)) {
+          grouped[cat].push(skill);
           placed = true;
           break;
         }
       }
       
       if (!placed) {
-        categorized['other'].push(skill);
+        grouped['other'].push(skill);
       }
     });
 
-    // Build tree structure
-    this.tree = this.categories
-      .map(cat => ({
-        id: cat.id,
-        type: 'category',
-        label: cat.label,
-        children: categorized[cat.id].sort((a, b) => 
-          new Date(b.createdAt) - new Date(a.createdAt)
-        )
-      }))
-      .filter(cat => cat.children.length > 0 || !this.searchQuery);
-
-    this.buildFlatTree();
+    // Build flat tree data
+    const cats = filterCategory ? [filterCategory] : this.categories;
     
-    // Update search count
-    if (this.searchQuery) {
-      const count = this.skills.filter(s => {
-        const text = `${s.title} ${s.description} ${s.creator} ${s.tags}`.toLowerCase();
-        return text.includes(this.searchQuery);
-      }).length;
-      document.getElementById('searchCount').textContent = `${count} found`;
-    } else {
-      document.getElementById('searchCount').textContent = '';
-    }
-  },
+    cats.forEach((cat, catIndex) => {
+      const skills = grouped[cat];
+      if (skills.length === 0 && !filterCategory) return;
 
-  buildFlatTree() {
-    this.flatTree = [];
-    
-    this.tree.forEach((category, catIndex) => {
-      const isLast = catIndex === this.tree.length - 1;
-      
-      this.flatTree.push({
-        id: category.id,
+      const isLast = catIndex === cats.length - 1 || 
+        cats.slice(catIndex + 1).every(c => grouped[c].length === 0);
+      const isExpanded = this.treeExpanded.has(cat);
+
+      this.treeData.push({
         type: 'category',
-        label: category.label,
-        count: category.children.length,
-        depth: 0,
-        isExpanded: this.expandedNodes.has(category.id),
-        isLast
+        id: cat,
+        name: cat + '/',
+        count: skills.length,
+        prefix: isLast ? '└── ' : '├── ',
+        isExpanded
       });
 
-      if (this.expandedNodes.has(category.id)) {
-        category.children.forEach((skill, skillIndex) => {
-          const isLastSkill = skillIndex === category.children.length - 1;
+      if (isExpanded) {
+        skills.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
+        
+        skills.forEach((skill, skillIndex) => {
+          const isLastSkill = skillIndex === skills.length - 1;
+          const linePrefix = isLast ? '    ' : '│   ';
+          const itemPrefix = isLastSkill ? '└── ' : '├── ';
           const isOwned = this.purchases.some(p => p.skillId === skill.id);
-          
-          this.flatTree.push({
-            id: skill.id,
+
+          this.treeData.push({
             type: 'skill',
-            label: skill.title,
+            id: skill.id,
+            name: skill.title,
             skill: skill,
-            parentId: category.id,
-            depth: 1,
-            isLast: isLastSkill,
-            isOwned,
+            prefix: linePrefix + itemPrefix,
             price: skill.price,
-            downloads: skill.downloads || 0
+            downloads: skill.downloads || 0,
+            isOwned
           });
         });
       }
     });
-
-    // Adjust selection if needed
-    if (this.selectedIndex >= this.flatTree.length) {
-      this.selectedIndex = Math.max(0, this.flatTree.length - 1);
-    }
   },
 
-  render() {
-    const container = document.getElementById('treeContainer');
+  renderTree() {
+    const output = document.getElementById('output');
     
-    if (this.flatTree.length === 0) {
-      container.innerHTML = this.searchQuery 
-        ? '<div class="tree-loading">No results found</div>'
-        : '<div class="tree-loading">No skills yet</div>';
-      return;
-    }
-
-    container.innerHTML = this.flatTree.map((node, index) => {
+    let html = `<div class="output-line dim">skills/</div>`;
+    
+    this.treeData.forEach((item, index) => {
       const isSelected = index === this.selectedIndex;
       
-      if (node.type === 'category') {
-        return `
-          <div class="tree-node">
-            <div class="tree-row ${isSelected ? 'selected' : ''}" 
-                 data-depth="${node.depth}" 
-                 data-index="${index}">
-              <span class="tree-toggle ${node.isExpanded ? 'expanded' : 'collapsed'}"></span>
-              <span class="tree-icon folder"></span>
-              <span class="tree-label category">${node.label}/</span>
-              <span class="tree-meta">
-                <span class="tree-downloads">(${node.count})</span>
-              </span>
-            </div>
+      if (item.type === 'category') {
+        const toggle = item.isExpanded ? '[-]' : '[+]';
+        html += `
+          <div class="tree-line ${isSelected ? 'selected' : ''}" data-index="${index}">
+            <span class="tree-prefix">${item.prefix}</span>
+            <span class="tree-name folder">${toggle} ${item.name}</span>
+            <span class="tree-meta">(${item.count})</span>
           </div>
         `;
       } else {
-        return `
-          <div class="tree-node">
-            <div class="tree-row ${isSelected ? 'selected' : ''}" 
-                 data-depth="${node.depth}" 
-                 data-index="${index}">
-              <span class="tree-toggle ${node.isLast ? 'last' : 'none'}"></span>
-              <span class="tree-icon file"></span>
-              <span class="tree-label">${this.escapeHtml(node.label)}</span>
-              <span class="tree-meta">
-                ${node.isOwned ? '<span class="tree-owned">[OWNED]</span>' : ''}
-                <span class="tree-price">${node.price === 0 ? 'FREE' : node.price + ' SOL'}</span>
-                <span class="tree-downloads">${node.downloads}</span>
-              </span>
-            </div>
+        html += `
+          <div class="tree-line ${isSelected ? 'selected' : ''}" data-index="${index}">
+            <span class="tree-prefix">${item.prefix}</span>
+            <span class="tree-name">${this.escapeHtml(item.name)}</span>
+            <span class="tree-meta">
+              ${item.isOwned ? '<span class="tree-owned">[owned]</span>' : ''}
+              <span class="tree-price">${item.price === 0 ? 'free' : item.price + ' SOL'}</span>
+              ${item.downloads}dl
+            </span>
           </div>
         `;
       }
-    }).join('');
+    });
+
+    if (this.treeData.length === 0) {
+      html += `<div class="output-line dim">  (empty)</div>`;
+    }
+
+    output.innerHTML = html;
 
     // Click handlers
-    container.querySelectorAll('.tree-row').forEach(row => {
-      row.addEventListener('click', () => {
-        this.selectedIndex = parseInt(row.dataset.index);
-        this.selectCurrent();
+    output.querySelectorAll('.tree-line').forEach(line => {
+      line.addEventListener('click', () => {
+        this.selectedIndex = parseInt(line.dataset.index);
+        this.renderTree();
+        this.selectTreeItem();
       });
     });
   },
 
-  updateStats(stats) {
-    const total = stats?.totalSkills || this.skills.length;
-    document.getElementById('footerStats').textContent = `${total} skills`;
+  navigateTree(delta) {
+    if (this.view !== 'tree' && this.view !== 'search') return;
+    
+    const maxIndex = this.treeData.length - 1;
+    this.selectedIndex = Math.max(0, Math.min(maxIndex, this.selectedIndex + delta));
+    this.renderTree();
+    
+    // Scroll selected into view
+    const selected = document.querySelector('.tree-line.selected');
+    if (selected) {
+      selected.scrollIntoView({ block: 'nearest' });
+    }
   },
 
-  // === DETAIL PANEL ===
+  selectTreeItem() {
+    const item = this.treeData[this.selectedIndex];
+    if (!item) return;
 
-  openDetail(skill) {
-    this.currentSkill = skill;
-    const isOwned = this.purchases.some(p => p.skillId === skill.id);
+    if (item.type === 'category') {
+      // Toggle expand/collapse
+      if (this.treeExpanded.has(item.id)) {
+        this.treeExpanded.delete(item.id);
+      } else {
+        this.treeExpanded.add(item.id);
+      }
+      this.buildTreeData();
+      this.renderTree();
+    } else if (item.type === 'skill') {
+      this.showSkillDetail(item.skill);
+    }
+  },
 
-    document.getElementById('detailTitle').textContent = skill.title;
-    document.getElementById('detailPrice').textContent = skill.price === 0 ? 'FREE' : skill.price + ' SOL';
-    document.getElementById('detailCreator').textContent = skill.creator;
-    document.getElementById('detailDownloads').textContent = skill.downloads || 0;
-    document.getElementById('detailDate').textContent = new Date(skill.createdAt).toLocaleDateString();
-    document.getElementById('detailDesc').textContent = skill.description || 'No description.';
-
-    const tags = (skill.tags || '').split(',').map(t => t.trim()).filter(Boolean);
-    document.getElementById('detailTags').innerHTML = tags.map(t => 
-      `<span class="detail-tag">${this.escapeHtml(t)}</span>`
-    ).join('');
-
-    const purchaseBtn = document.getElementById('detailPurchase');
-    const downloadBtn = document.getElementById('detailDownload');
-
-    if (isOwned) {
-      purchaseBtn.hidden = true;
-      downloadBtn.hidden = false;
+  cdCategory(cat) {
+    if (!cat) {
+      this.showTree();
+      return;
+    }
+    
+    const category = this.categories.find(c => c.startsWith(cat.toLowerCase()));
+    if (category) {
+      this.showTree(category);
     } else {
-      purchaseBtn.hidden = false;
-      downloadBtn.hidden = true;
-      purchaseBtn.textContent = Wallet.address ? 'PURCHASE' : 'CONNECT WALLET';
+      this.output(`category not found: ${cat}`, 'dim');
+    }
+  },
+
+  search(query) {
+    if (!query) {
+      this.output('usage: find <search query>', 'dim');
+      return;
     }
 
-    document.getElementById('detailStatus').hidden = true;
-    document.getElementById('detailPanel').hidden = false;
+    this.view = 'search';
+    this.selectedIndex = 0;
+
+    const q = query.toLowerCase();
+    const results = this.skills.filter(skill => {
+      const text = `${skill.title} ${skill.description} ${skill.creator} ${skill.tags}`.toLowerCase();
+      return text.includes(q);
+    });
+
+    this.treeData = results.map((skill, index) => {
+      const isOwned = this.purchases.some(p => p.skillId === skill.id);
+      return {
+        type: 'skill',
+        id: skill.id,
+        name: skill.title,
+        skill: skill,
+        prefix: index === results.length - 1 ? '└── ' : '├── ',
+        price: skill.price,
+        downloads: skill.downloads || 0,
+        isOwned
+      };
+    });
+
+    this.clearOutput();
+    this.output(`search results for "${query}": ${results.length} found`, 'dim');
+    this.output('');
+    this.renderTree();
   },
 
-  closeDetail() {
-    document.getElementById('detailPanel').hidden = true;
-    this.currentSkill = null;
-    document.getElementById('treeContainer').focus();
+  viewSkill(name) {
+    if (!name) {
+      this.output('usage: cat <skill name>', 'dim');
+      return;
+    }
+
+    const q = name.toLowerCase();
+    const skill = this.skills.find(s => 
+      s.title.toLowerCase().includes(q) || s.id === name
+    );
+
+    if (skill) {
+      this.showSkillDetail(skill);
+    } else {
+      this.output(`skill not found: ${name}`, 'dim');
+    }
   },
+
+  showSkillDetail(skill) {
+    this.view = 'skill';
+    this.currentSkill = skill;
+    const isOwned = this.purchases.some(p => p.skillId === skill.id);
+    const tags = (skill.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+
+    const output = document.getElementById('output');
+    output.innerHTML = `
+      <div class="skill-detail">
+        <div class="skill-title">${this.escapeHtml(skill.title)}</div>
+        <div class="skill-meta">
+          <span>creator: ${this.escapeHtml(skill.creator)}</span>
+          <span>price: ${skill.price === 0 ? 'free' : skill.price + ' SOL'}</span>
+          <span>downloads: ${skill.downloads || 0}</span>
+        </div>
+        <div class="skill-desc">${this.escapeHtml(skill.description || 'No description.')}</div>
+        <div class="skill-tags">
+          ${tags.map(t => `<span class="skill-tag">${this.escapeHtml(t)}</span>`).join('')}
+        </div>
+        <div class="skill-actions">
+          ${isOwned 
+            ? `<button class="action-btn success" id="downloadBtn">[download]</button>` 
+            : `<button class="action-btn primary" id="purchaseBtn">[${Wallet.address ? 'purchase' : 'connect wallet'}]</button>`
+          }
+          <button class="action-btn" id="backBtn">[back]</button>
+        </div>
+        <div class="skill-status" id="skillStatus" hidden></div>
+      </div>
+    `;
+
+    document.getElementById('backBtn').addEventListener('click', () => this.goBack());
+    
+    if (isOwned) {
+      document.getElementById('downloadBtn').addEventListener('click', () => this.handleDownload());
+    } else {
+      document.getElementById('purchaseBtn').addEventListener('click', () => this.handlePurchase());
+    }
+  },
+
+  topSkills(n) {
+    const top = [...this.skills]
+      .sort((a, b) => (b.downloads || 0) - (a.downloads || 0))
+      .slice(0, n);
+
+    this.view = 'search';
+    this.selectedIndex = 0;
+    
+    this.treeData = top.map((skill, index) => {
+      const isOwned = this.purchases.some(p => p.skillId === skill.id);
+      return {
+        type: 'skill',
+        id: skill.id,
+        name: skill.title,
+        skill: skill,
+        prefix: `${(index + 1).toString().padStart(2, ' ')}. `,
+        price: skill.price,
+        downloads: skill.downloads || 0,
+        isOwned
+      };
+    });
+
+    this.clearOutput();
+    this.output(`top ${n} skills by downloads:`, 'dim');
+    this.output('');
+    this.renderTree();
+  },
+
+  randomSkill() {
+    if (this.skills.length === 0) {
+      this.output('no skills available', 'dim');
+      return;
+    }
+    
+    const skill = this.skills[Math.floor(Math.random() * this.skills.length)];
+    this.showSkillDetail(skill);
+  },
+
+  goBack() {
+    if (this.view === 'skill') {
+      this.showTree();
+    } else if (this.view === 'search') {
+      this.showTree();
+    } else if (this.view === 'upload') {
+      this.hideUpload();
+    } else {
+      this.goHome();
+    }
+  },
+
+  goHome() {
+    this.view = 'home';
+    document.getElementById('output').innerHTML = `
+      <div class="output-line dim">Type 'tree' to browse skills, 'help' for commands</div>
+    `;
+    document.getElementById('hero').hidden = false;
+  },
+
+  clearOutput() {
+    document.getElementById('output').innerHTML = '';
+    document.getElementById('hero').hidden = true;
+  },
+
+  output(text, className = '') {
+    const output = document.getElementById('output');
+    const line = document.createElement('div');
+    line.className = `output-line ${className}`;
+    line.textContent = text;
+    output.appendChild(line);
+  },
+
+  // === UPLOAD ===
+
+  showUpload() {
+    if (!Wallet.address) {
+      this.output('connect wallet first: type "connect"', 'dim');
+      return;
+    }
+    
+    this.view = 'upload';
+    document.getElementById('hero').hidden = true;
+    document.getElementById('output').hidden = true;
+    document.getElementById('uploadSection').hidden = false;
+    document.getElementById('skillTitle').focus();
+  },
+
+  hideUpload() {
+    document.getElementById('uploadSection').hidden = true;
+    document.getElementById('output').hidden = false;
+    this.view = 'home';
+    document.getElementById('hero').hidden = false;
+  },
+
+  async handleUpload() {
+    const btn = document.querySelector('#uploadForm button[type="submit"]');
+    btn.textContent = '[uploading...]';
+    btn.disabled = true;
+
+    try {
+      const data = {
+        title: document.getElementById('skillTitle').value.trim(),
+        price: parseFloat(document.getElementById('skillPrice').value) || 0,
+        tags: document.getElementById('skillCategory').value + ', ' + 
+              document.getElementById('skillTags').value.trim(),
+        description: document.getElementById('skillDesc').value.trim(),
+        content: document.getElementById('skillContent').value,
+        creator: Wallet.shortenAddress(),
+        creatorWallet: Wallet.address
+      };
+
+      await API.createSkill(data);
+      document.getElementById('uploadForm').reset();
+      this.hideUpload();
+      await this.loadSkills();
+      this.output('skill uploaded successfully', 'green');
+
+    } catch (err) {
+      console.error('Upload failed:', err);
+      this.output(`upload failed: ${err.message}`, 'accent');
+    }
+
+    btn.textContent = '[submit]';
+    btn.disabled = false;
+  },
+
+  // === PURCHASE/DOWNLOAD ===
 
   async handlePurchase() {
     if (!this.currentSkill) return;
 
     if (!Wallet.address) {
       await Wallet.connect();
+      if (Wallet.address) {
+        this.showSkillDetail(this.currentSkill);
+      }
       return;
     }
 
-    const statusEl = document.getElementById('detailStatus');
-    const btn = document.getElementById('detailPurchase');
+    const statusEl = document.getElementById('skillStatus');
+    const btn = document.getElementById('purchaseBtn');
 
     statusEl.hidden = false;
-    statusEl.className = 'detail-status loading';
-    statusEl.textContent = 'Creating transaction...';
+    statusEl.className = 'skill-status loading';
+    statusEl.textContent = 'creating transaction...';
     btn.disabled = true;
 
     try {
       if (!this.currentSkill.creatorWallet) {
-        throw new Error('Creator has not set a wallet');
+        throw new Error('creator has not set a wallet');
       }
 
-      statusEl.textContent = 'Confirm in Phantom...';
+      statusEl.textContent = 'confirm in phantom...';
       const sig = await Solana.executePurchase(
         this.currentSkill.creatorWallet,
         this.currentSkill.price
       );
 
-      statusEl.textContent = 'Recording purchase...';
+      statusEl.textContent = 'recording purchase...';
       await API.createPurchase({
         buyerWallet: Wallet.address,
         skillId: this.currentSkill.id,
@@ -469,8 +623,8 @@ const App = {
         pricePaid: this.currentSkill.price
       });
 
-      statusEl.className = 'detail-status success';
-      statusEl.textContent = 'Purchase successful!';
+      statusEl.className = 'skill-status success';
+      statusEl.textContent = 'purchase successful!';
 
       this.purchases.push({
         skillId: this.currentSkill.id,
@@ -478,16 +632,13 @@ const App = {
         purchasedAt: new Date().toISOString()
       });
 
-      btn.hidden = true;
-      document.getElementById('detailDownload').hidden = false;
-
-      this.buildFlatTree();
-      this.render();
+      // Refresh view
+      setTimeout(() => this.showSkillDetail(this.currentSkill), 1000);
 
     } catch (err) {
       console.error('Purchase failed:', err);
-      statusEl.className = 'detail-status error';
-      statusEl.textContent = err.message || 'Purchase failed';
+      statusEl.className = 'skill-status error';
+      statusEl.textContent = err.message || 'purchase failed';
     }
 
     btn.disabled = false;
@@ -511,72 +662,47 @@ const App = {
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Download failed:', err);
-      alert(err.message || 'Download failed');
+      alert(err.message || 'download failed');
     }
   },
 
-  // === UPLOAD PANEL ===
+  // === DATA LOADING ===
 
-  openUpload() {
-    if (!Wallet.address) {
-      Wallet.connect();
-      return;
-    }
-    document.getElementById('uploadPanel').hidden = false;
-  },
-
-  closeUpload() {
-    document.getElementById('uploadPanel').hidden = true;
-    document.getElementById('treeContainer').focus();
-  },
-
-  async handleUpload() {
-    const btn = document.querySelector('#uploadForm button[type="submit"]');
-    btn.disabled = true;
-    btn.textContent = 'UPLOADING...';
-
+  async loadSkills() {
     try {
-      const skillData = {
-        title: document.getElementById('skillTitle').value.trim(),
-        price: parseFloat(document.getElementById('skillPrice').value) || 0,
-        tags: document.getElementById('skillCategory').value + ', ' + document.getElementById('skillTags').value.trim(),
-        description: document.getElementById('skillDesc').value.trim(),
-        content: document.getElementById('skillContent').value,
-        creator: Wallet.shortenAddress(),
-        creatorWallet: Wallet.address
-      };
-
-      await API.createSkill(skillData);
-      document.getElementById('uploadForm').reset();
-      this.closeUpload();
-      await this.loadSkills();
-      alert('Skill uploaded!');
-
+      const data = await API.getSkills();
+      this.skills = data.skills || [];
+      document.getElementById('skillCount').textContent = this.skills.length;
     } catch (err) {
-      console.error('Upload failed:', err);
-      alert(err.message || 'Upload failed');
+      console.error('Failed to load skills:', err);
+      this.output('failed to load skills', 'accent');
     }
+  },
 
-    btn.disabled = false;
-    btn.textContent = 'UPLOAD';
+  async loadPurchases() {
+    if (!Wallet.address) return;
+    try {
+      const data = await API.getPurchases(Wallet.address);
+      this.purchases = data.purchases || [];
+    } catch (err) {
+      console.error('Failed to load purchases:', err);
+    }
   },
 
   // === WALLET ===
 
   onWalletConnect(addr) {
-    document.getElementById('walletStatus').textContent = `[ ${Wallet.shortenAddress(addr)} ]`;
-    document.getElementById('walletStatus').classList.add('connected');
-    document.getElementById('walletBtn').textContent = 'DISCONNECT';
+    document.getElementById('walletInfo').textContent = Wallet.shortenAddress(addr);
+    document.getElementById('walletInfo').classList.add('connected');
+    document.getElementById('walletBtn').textContent = '[disconnect]';
     this.loadPurchases();
   },
 
   onWalletDisconnect() {
-    document.getElementById('walletStatus').textContent = '[ NOT CONNECTED ]';
-    document.getElementById('walletStatus').classList.remove('connected');
-    document.getElementById('walletBtn').textContent = 'CONNECT';
+    document.getElementById('walletInfo').textContent = 'not connected';
+    document.getElementById('walletInfo').classList.remove('connected');
+    document.getElementById('walletBtn').textContent = '[connect]';
     this.purchases = [];
-    this.buildFlatTree();
-    this.render();
   },
 
   escapeHtml(text) {

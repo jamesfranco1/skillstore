@@ -5,87 +5,55 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0a0a0a">
   <title>skillstore.md</title>
+  <meta name="description" content="Skill directory for AI agents. Pay in SOL.">
+  <link rel="alternate" type="application/json" href="/api/skills.json">
   <link rel="stylesheet" href="/css/main.css">
 </head>
 <body>
-  <!-- Terminal Interface -->
-  <div class="terminal" id="terminal">
-    <!-- Header Bar -->
-    <div class="terminal-header">
-      <span class="terminal-title">SKILLSTORE.MD</span>
-      <span class="terminal-status" id="walletStatus">[ NOT CONNECTED ]</span>
-      <button class="terminal-btn" id="walletBtn">CONNECT</button>
+  <div class="terminal">
+    <!-- Header -->
+    <header class="header">
+      <span class="logo">skillstore.md</span>
+      <span class="header-sep">|</span>
+      <span class="header-info" id="walletInfo">not connected</span>
+      <button class="header-btn" id="walletBtn">[connect]</button>
+    </header>
+
+    <!-- Hero / Agent Info -->
+    <section class="hero" id="hero">
+      <pre class="ascii-box">
++--------------------------------------------------+
+|  SKILL DIRECTORY FOR AI AGENTS                   |
+|                                                  |
+|  Endpoint: GET /api/skills.json                  |
+|  Search:   GET /api/skills?q=your+query          |
+|                                                  |
+|  Skills indexed: <span id="skillCount">0</span>                              |
++--------------------------------------------------+
+      </pre>
+    </section>
+
+    <!-- Command Line -->
+    <div class="cli">
+      <span class="cli-prompt">skillstore&gt;</span>
+      <input type="text" class="cli-input" id="cliInput" placeholder="type 'help' for commands" autocomplete="off" spellcheck="false">
     </div>
 
-    <!-- Main Tree View -->
-    <div class="terminal-body" id="terminalBody">
-      <!-- Breadcrumb -->
-      <div class="breadcrumb" id="breadcrumb">
-        <span class="crumb active">root</span>
-      </div>
+    <!-- Output Area -->
+    <main class="output" id="output">
+      <div class="output-line dim">Type 'tree' to browse skills, 'help' for commands</div>
+    </main>
 
-      <!-- Search Bar -->
-      <div class="search-bar">
-        <span class="search-prompt">/</span>
-        <input type="text" id="searchInput" placeholder="type to search..." autocomplete="off">
-        <span class="search-count" id="searchCount"></span>
-      </div>
-
-      <!-- Tree Container -->
-      <div class="tree-container" id="treeContainer" tabindex="0">
-        <div class="tree-loading">Loading...</div>
-      </div>
-    </div>
-
-    <!-- Footer Status Bar -->
-    <div class="terminal-footer">
-      <span class="footer-hint"><kbd>↑↓</kbd> navigate</span>
-      <span class="footer-hint"><kbd>→</kbd> expand</span>
-      <span class="footer-hint"><kbd>←</kbd> collapse</span>
-      <span class="footer-hint"><kbd>Enter</kbd> select</span>
-      <span class="footer-hint"><kbd>/</kbd> search</span>
-      <span class="footer-hint"><kbd>u</kbd> upload</span>
-      <span class="footer-stats" id="footerStats">0 skills</span>
-    </div>
-  </div>
-
-  <!-- Detail Panel (slides in) -->
-  <div class="detail-panel" id="detailPanel" hidden>
-    <div class="detail-header">
-      <button class="detail-back" id="detailBack">← BACK</button>
-      <span class="detail-price" id="detailPrice"></span>
-    </div>
-    <div class="detail-body">
-      <h1 id="detailTitle"></h1>
-      <div class="detail-meta">
-        <span>Creator: <strong id="detailCreator"></strong></span>
-        <span>Downloads: <strong id="detailDownloads"></strong></span>
-        <span>Added: <strong id="detailDate"></strong></span>
-      </div>
-      <p class="detail-desc" id="detailDesc"></p>
-      <div class="detail-tags" id="detailTags"></div>
-      <div class="detail-actions">
-        <button class="action-btn action-primary" id="detailPurchase">PURCHASE</button>
-        <button class="action-btn action-success" id="detailDownload" hidden>DOWNLOAD</button>
-      </div>
-      <div class="detail-status" id="detailStatus" hidden></div>
-    </div>
-  </div>
-
-  <!-- Upload Panel -->
-  <div class="upload-panel" id="uploadPanel" hidden>
-    <div class="upload-header">
-      <span>UPLOAD NEW SKILL</span>
-      <button class="detail-back" id="uploadBack">← BACK</button>
-    </div>
-    <form class="upload-form" id="uploadForm">
-      <div class="form-field">
-        <label>TITLE</label>
-        <input type="text" id="skillTitle" required>
-      </div>
-      <div class="form-row">
-        <div class="form-field">
-          <label>CATEGORY</label>
+    <!-- Upload Form (hidden by default) -->
+    <div class="upload-section" id="uploadSection" hidden>
+      <div class="output-line">--- UPLOAD NEW SKILL ---</div>
+      <form id="uploadForm" class="upload-form">
+        <div class="form-line">
+          <span class="form-label">title:</span>
+          <input type="text" id="skillTitle" required>
+        </div>
+        <div class="form-line">
+          <span class="form-label">category:</span>
           <select id="skillCategory" required>
             <option value="security">security</option>
             <option value="automation">automation</option>
@@ -96,25 +64,34 @@
             <option value="other">other</option>
           </select>
         </div>
-        <div class="form-field">
-          <label>PRICE (SOL)</label>
+        <div class="form-line">
+          <span class="form-label">price:</span>
           <input type="number" id="skillPrice" min="0" step="0.01" value="0" required>
+          <span class="dim">SOL</span>
         </div>
-      </div>
-      <div class="form-field">
-        <label>TAGS (comma separated)</label>
-        <input type="text" id="skillTags" placeholder="tag1, tag2, tag3">
-      </div>
-      <div class="form-field">
-        <label>DESCRIPTION</label>
-        <textarea id="skillDesc" rows="2"></textarea>
-      </div>
-      <div class="form-field">
-        <label>CONTENT (markdown)</label>
-        <textarea id="skillContent" rows="8" required></textarea>
-      </div>
-      <button type="submit" class="action-btn action-primary">UPLOAD</button>
-    </form>
+        <div class="form-line">
+          <span class="form-label">tags:</span>
+          <input type="text" id="skillTags" placeholder="tag1, tag2, tag3">
+        </div>
+        <div class="form-line">
+          <span class="form-label">desc:</span>
+          <input type="text" id="skillDesc">
+        </div>
+        <div class="form-line">
+          <span class="form-label">content:</span>
+        </div>
+        <textarea id="skillContent" rows="6" required placeholder="# Your skill content (markdown)"></textarea>
+        <div class="form-actions">
+          <button type="submit" class="form-btn">[submit]</button>
+          <button type="button" class="form-btn" id="uploadCancel">[cancel]</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span class="dim">arrow keys to navigate | enter to select | esc to go back</span>
+    </footer>
   </div>
 
   <script src="/js/api.js"></script>
